@@ -136,7 +136,9 @@ yarn start
 
 ## License
 
-This project is licensed under the MIT License - see the LICENSE file for details.
+This project is licensed under **All Rights Reserved**.  
+You may view the code, but you **may not copy, modify, or distribute** it.  
+Contact samiirshad825@gmail.com for permissions.
 
 ## Contact
 
