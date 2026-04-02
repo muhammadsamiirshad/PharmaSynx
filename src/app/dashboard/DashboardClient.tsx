@@ -48,15 +48,17 @@ interface SalesData {
 
 // Update your ProductData interface to match the Product interface in ProductModals
 interface ProductData {
-    id: number; // Changed from string to number for SQLite
+    id: string | number;
     name: string;
-    description: string;
-    category: string;
-    price: number;
-    stock: number;
-    unit: string;
-    defaultQty: number;
-    photo: string; // Remove optional
+    generic_name?: string;
+    description?: string;
+    category_id?: number;
+    category_name?: string;
+    price_per_box?: number;
+    price_per_strip?: number;
+    price_per_tablet?: number;
+    base_stock: number;
+    unit_config?: any;
     expiry_date?: string;
 }
 
@@ -217,10 +219,26 @@ const Dashboard: React.FC = () => {
         return productData.find(p => p.id.toString() === saleItem.product_id.toString());
     };
 
+    const getUnitConfig = (product?: ProductData) => {
+        const unitLevels = Math.min(3, Math.max(1, Number(product?.unit_config?.unit_levels ?? 3)));
+        const conversion1To2 = Math.max(1, Number(product?.unit_config?.conversion_1_to_2 ?? 1));
+        const conversion2To3 = Math.max(1, Number(product?.unit_config?.conversion_2_to_3 ?? 1));
+
+        return {
+            unitLevels,
+            conversion1To2,
+            conversion2To3,
+            level1Name: product?.unit_config?.level_1_name || 'Box',
+            level2Name: product?.unit_config?.level_2_name || 'Strip',
+            level3Name: product?.unit_config?.level_3_name || 'Tablet'
+        };
+    };
+
     const formatBaseQty = (baseQty: number, saleItem: SalesData['items'][number]) => {
         const product = getProductForSaleItem(saleItem);
-        const stripsPerBox = Math.max(1, product?.strips_per_box ?? 1);
-        const tabsPerStrip = Math.max(1, product?.tabs_per_strip ?? 1);
+        const { conversion1To2, conversion2To3, level1Name, level2Name, level3Name } = getUnitConfig(product);
+        const stripsPerBox = conversion1To2;
+        const tabsPerStrip = conversion2To3;
         const tabsPerBox = stripsPerBox * tabsPerStrip;
 
         const boxes = Math.floor(baseQty / tabsPerBox);
@@ -229,10 +247,10 @@ const Dashboard: React.FC = () => {
         const tablets = remainingAfterBoxes % tabsPerStrip;
 
         const parts: string[] = [];
-        if (boxes > 0) parts.push(`${boxes} Bx`);
-        if (strips > 0) parts.push(`${strips} Str`);
-        if (tablets > 0) parts.push(`${tablets} Tab`);
-        return parts.length ? parts.join(', ') : '0 Tab';
+        if (boxes > 0) parts.push(`${boxes} ${level1Name}`);
+        if (strips > 0) parts.push(`${strips} ${level2Name}`);
+        if (tablets > 0) parts.push(`${tablets} ${level3Name}`);
+        return parts.length ? parts.join(', ') : `0 ${level3Name}`;
     };
 
     const openReturnModal = (sale: SalesData) => {
@@ -260,8 +278,9 @@ const Dashboard: React.FC = () => {
         const key = getReturnItemKey(returnSaleData.id, saleItem.product_id);
         const prev = returnQuantities[key] || { boxQty: 0, stripQty: 0, tabletQty: 0 };
         const product = getProductForSaleItem(saleItem);
-        const stripsPerBox = Math.max(1, product?.strips_per_box ?? 1);
-        const tabsPerStrip = Math.max(1, product?.tabs_per_strip ?? 1);
+        const { conversion1To2, conversion2To3 } = getUnitConfig(product);
+        const stripsPerBox = conversion1To2;
+        const tabsPerStrip = conversion2To3;
 
         const next = { ...prev, [field]: Math.max(0, rawValue || 0) };
 
@@ -290,8 +309,9 @@ const Dashboard: React.FC = () => {
         const key = getReturnItemKey(returnSaleData.id, saleItem.product_id);
         const values = returnQuantities[key] || { boxQty: 0, stripQty: 0, tabletQty: 0 };
         const product = getProductForSaleItem(saleItem);
-        const stripsPerBox = Math.max(1, product?.strips_per_box ?? 1);
-        const tabsPerStrip = Math.max(1, product?.tabs_per_strip ?? 1);
+        const { conversion1To2, conversion2To3 } = getUnitConfig(product);
+        const stripsPerBox = conversion1To2;
+        const tabsPerStrip = conversion2To3;
 
         return (
             values.boxQty * stripsPerBox * tabsPerStrip +
@@ -772,12 +792,9 @@ const Dashboard: React.FC = () => {
                 productData.map(product => ({
                     'ID': product.id,
                     'Product Name': product.name,
-                    'Category': product.category || 'Uncategorized',
-                    'Description': product.description,
-                    'Price (Rs.)': parseFloat(product.price.toString()).toFixed(2),
-                    'Stock': product.stock,
-                    'Unit': product.unit,
-                    'Default Qty': product.defaultQty
+                    'Category': product.category_name || 'Uncategorized',
+                    'Price (Rs.)': parseFloat((product.price_per_box || 0).toString()).toFixed(2),
+                    'Base Stock': product.base_stock || 0
                 }))
             );
             
@@ -899,7 +916,7 @@ const Dashboard: React.FC = () => {
             
             // Apply category filter
             const matchesCategory = categoryFilter === '' || 
-                product.category === categoryFilter;
+                product.category_name === categoryFilter;
             
             return matchesSearch && matchesCategory;
         });
@@ -908,7 +925,7 @@ const Dashboard: React.FC = () => {
     // Get unique categories for filter dropdown
     const uniqueCategories = useMemo(() => {
         const categories = productData
-            .map(product => product.category)
+            .map(product => product.category_name)
             .filter((category, index, self) => 
                 category && self.indexOf(category) === index
             );
@@ -991,7 +1008,7 @@ const Dashboard: React.FC = () => {
         const categoryCount: Record<string, number> = {};
         
         productData.forEach(product => {
-            const category = product.category || 'Uncategorized';
+            const category = product.category_name || 'Uncategorized';
             categoryCount[category] = (categoryCount[category] || 0) + 1;
         });
         
@@ -1063,8 +1080,8 @@ const Dashboard: React.FC = () => {
     // Get low stock products
     const lowStockProducts = useMemo(() => {
         return productData
-            .filter(product => product.stock <= 5)
-            .sort((a, b) => a.stock - b.stock)
+            .filter(product => (product.base_stock || 0) <= 5)
+            .sort((a, b) => (a.base_stock || 0) - (b.base_stock || 0))
             .slice(0, 5);
     }, [productData]);
 
@@ -1444,9 +1461,9 @@ const Dashboard: React.FC = () => {
                                                                 {lowStockProducts.map((product) => (
                                                                     <tr key={product.id} className="border-b border-gray-100 ">
                                                                         <td className="py-2 px-3 text-gray-600">{product.name}</td>
-                                                                        <td className="py-2 px-3 text-right text-gray-600">{product.stock} {product.unit}</td>
+                                                                        <td className="py-2 px-3 text-right text-gray-600">{product.base_stock || 0} {product.unit_config?.level_1_name || 'Unit'}</td>
                                                                         <td className="py-2 px-3 text-center text-gray-600">
-                                                                            {product.stock === 0 ? (
+                                                                            {(product.base_stock || 0) === 0 ? (
                                                                                 <span className="bg-red-100 text-red-800 text-xs font-medium px-2 py-0.5 rounded">
                                                                                     Out of Stock
                                                                                 </span>
@@ -1665,12 +1682,11 @@ const Dashboard: React.FC = () => {
                                                         <tr key={product.id} className="border-b hover:bg-gray-50 ">
                                                             <td className="px-6 py-4 text-gray-700">{product.id}</td>
                                                             <td className="px-6 py-4 text-gray-700">{product.name}</td>
-                                                            <td className="px-6 py-4 text-gray-700">{product.category || 'Uncategorized'}</td>
-                                                            <td className="px-6 py-4 text-gray-700">Rs. {parseFloat(product.price.toString()).toFixed(2)}</td>
-                                                            <td className="px-6 py-4 text-gray-700">{product.expiry_date || 'N/A'}</td>
+                                                            <td className="px-6 py-4 text-gray-700">{product.category_name || 'Uncategorized'}</td>
+                                                            <td className="px-6 py-4 text-gray-700">Rs. {parseFloat((product.price_per_box || 0).toString()).toFixed(2)}</td>
                                                             <td className="px-6 py-4 text-gray-700">
-                                                                <span className={`${product.stock <= 5 ? 'text-red-600 font-bold' : 'text-green-600'}`}>
-                                                                    {product.stock} {product.unit}
+                                                                <span className={`${(product.base_stock || 0) <= 5 ? 'text-red-600 font-bold' : 'text-green-600'}`}>
+                                                                    {product.base_stock || 0} {product.unit_config?.level_1_name || 'Unit'}
                                                                 </span>
                                                             </td>
                                                             <td className="px-6 py-4">
@@ -1825,13 +1841,13 @@ const Dashboard: React.FC = () => {
                                                         <tr key={product.id} className="border-b hover:bg-gray-50">
                                                             <td className="px-6 py-4 text-gray-700">{product.id}</td>
                                                             <td className="px-6 py-4 text-gray-700">{product.name}</td>
-                                                            <td className="px-6 py-4 text-gray-700">{product.category || 'Uncategorized'}</td>
+                                                            <td className="px-6 py-4 text-gray-700">{product.category_name || 'Uncategorized'}</td>
                                                             <td className="px-6 py-4 text-gray-700">
-                                                                <span className={`${product.stock <= 5 ? 'text-red-600 font-bold' : 'text-green-600'}`}>
-                                                                    {product.stock}
+                                                                <span className={`${product.base_stock <= 5 ? 'text-red-600 font-bold' : 'text-green-600'}`}>
+                                                                    {product.base_stock || 0}
                                                                 </span>
                                                             </td>
-                                                            <td className="px-6 py-4 text-gray-700">{product.unit}</td>
+                                                            <td className="px-6 py-4 text-gray-700">{product.unit_config?.level_1_name || 'Unit'}</td>
                                                             <td className="px-6 py-4">
                                                                 <button 
                                                                     onClick={() => handleAddStock(product)}
@@ -2091,7 +2107,7 @@ const Dashboard: React.FC = () => {
                         showListModal={showListProductModal}
                         setShowAddModal={setShowAddProductModal}
                         setShowListModal={setShowListProductModal}
-                        productToEdit={editingProduct ? {...editingProduct, photo: editingProduct.photo || '', expiry_date: editingProduct.expiry_date || ''} : undefined}
+                        productToEdit={editingProduct}
                         editModeOnly={!!editingProduct} // Add this line - if editingProduct exists, use edit mode only
                     />
                 )}

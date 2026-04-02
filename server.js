@@ -113,38 +113,29 @@ async function initializeDatabase() {
             driver: sqlite3.Database
         });
 
-        // Create products table with category as a simple column
+        // Initialize final 2026 database schema
         await db.exec(`
+            CREATE TABLE IF NOT EXISTS categories (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL UNIQUE,
+                unit_levels INTEGER NOT NULL,
+                level_1_name TEXT NOT NULL,
+                level_2_name TEXT,
+                level_3_name TEXT,
+                conversion_1_to_2 INTEGER,
+                conversion_2_to_3 INTEGER
+            );
+
             CREATE TABLE IF NOT EXISTS products (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 name TEXT NOT NULL,
                 generic_name TEXT,
-                description TEXT,
-                category TEXT, /* Changed from category_id to category text */
-                price REAL NOT NULL,
-                stock INTEGER DEFAULT 0,
-                strips_per_box INTEGER DEFAULT 1,
-                tabs_per_strip INTEGER DEFAULT 1,
-                price_per_box REAL DEFAULT 0,
-                price_per_strip REAL DEFAULT 0,
-                price_per_tablet REAL DEFAULT 0,
-                base_stock INTEGER DEFAULT 0,
-                unit TEXT NOT NULL,
-                default_qty INTEGER DEFAULT 1,
-                photo TEXT,
-                expiry_date TEXT
-            );
-
-            CREATE TABLE IF NOT EXISTS categories (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                name TEXT NOT NULL UNIQUE,
-                unit_levels INTEGER DEFAULT 1,
-                level_1_name TEXT,
-                level_2_name TEXT,
-                level_3_name TEXT,
-                conversion_1_to_2 INTEGER,
-                conversion_2_to_3 INTEGER,
-                created_at TEXT DEFAULT CURRENT_TIMESTAMP
+                category_id INTEGER,
+                price_per_box REAL,
+                price_per_strip REAL,
+                price_per_tablet REAL,
+                base_stock INTEGER,
+                FOREIGN KEY (category_id) REFERENCES categories (id)
             );
 
             CREATE TABLE IF NOT EXISTS sales (
@@ -152,34 +143,30 @@ async function initializeDatabase() {
                 total REAL NOT NULL,
                 subtotal REAL NOT NULL,
                 discount REAL DEFAULT 0,
-                date TEXT DEFAULT CURRENT_TIMESTAMP
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP
             );
 
             CREATE TABLE IF NOT EXISTS sale_items (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                sale_id INTEGER,
-                product_id INTEGER,
-                quantity INTEGER NOT NULL,
-                price REAL NOT NULL,
-                name TEXT NOT NULL,
-                unit TEXT NOT NULL,
+                sale_id INTEGER NOT NULL,
+                product_id INTEGER NOT NULL,
+                qty INTEGER NOT NULL,
+                line_total REAL NOT NULL,
                 FOREIGN KEY (sale_id) REFERENCES sales (id),
                 FOREIGN KEY (product_id) REFERENCES products (id)
             );
 
             CREATE TABLE IF NOT EXISTS returns (
-                id INTEGER PRIMARY KEY,
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
                 sale_id INTEGER,
                 product_id INTEGER,
                 return_qty_base INTEGER,
                 refund_amount REAL,
-                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY (sale_id) REFERENCES sales (id),
                 FOREIGN KEY (product_id) REFERENCES products (id)
             );
         `);
-
-        await ensureCategorySchemaColumns();
 
         console.log('Database initialized successfully');
     } catch (err) {
@@ -198,40 +185,44 @@ initializeDatabase().then(() => {
                     p.id,
                     p.name,
                     p.generic_name,
-                    p.description,
-                    p.category,
-                    p.price,
-                    p.stock,
-                    p.strips_per_box,
-                    p.tabs_per_strip,
-                    p.price_per_box,
-                    p.price_per_strip,
-                    p.price_per_tablet,
-                    p.base_stock,
-                    p.unit,
-                    p.default_qty,
-                    p.photo,
-                    p.expiry_date,
-                    c.unit_levels AS category_unit_levels,
-                    c.level_1_name AS category_level_1_name,
-                    c.level_2_name AS category_level_2_name,
-                    c.level_3_name AS category_level_3_name,
-                    c.conversion_1_to_2 AS category_conversion_1_to_2,
-                    c.conversion_2_to_3 AS category_conversion_2_to_3
+                    p.category_id,
+                    COALESCE(p.price_per_box, 0) AS price_per_box,
+                    COALESCE(p.price_per_strip, 0) AS price_per_strip,
+                    COALESCE(p.price_per_tablet, 0) AS price_per_tablet,
+                    COALESCE(p.base_stock, 0) AS base_stock,
+                    c.name AS category_name,
+                    c.unit_levels,
+                    c.level_1_name,
+                    c.level_2_name,
+                    c.level_3_name,
+                    c.conversion_1_to_2,
+                    c.conversion_2_to_3
                 FROM products p
-                LEFT JOIN categories c ON c.name = p.category
+                LEFT JOIN categories c ON c.id = p.category_id
             `);
             res.json(products.map(product => ({
-                ...product,
-                category: product.category || 'Uncategorized',
-                unit: product.category_level_3_name || product.category_level_2_name || product.category_level_1_name || product.unit,
+                id: product.id,
+                name: product.name,
+                generic_name: product.generic_name,
+                category_id: product.category_id,
+                category_name: product.category_name || 'Uncategorized',
+                price_per_box: product.price_per_box,
+                price_per_strip: product.price_per_strip,
+                price_per_tablet: product.price_per_tablet,
+                base_stock: product.base_stock,
+                unit_levels: product.unit_levels || DEFAULT_CATEGORY_UNITS.unit_levels,
+                level_1_name: product.level_1_name || DEFAULT_CATEGORY_UNITS.level_1_name,
+                level_2_name: product.level_2_name || null,
+                level_3_name: product.level_3_name || null,
+                conversion_1_to_2: product.conversion_1_to_2 || null,
+                conversion_2_to_3: product.conversion_2_to_3 || null,
                 unit_config: {
-                    unit_levels: product.category_unit_levels || DEFAULT_CATEGORY_UNITS.unit_levels,
-                    level_1_name: product.category_level_1_name || product.unit || DEFAULT_CATEGORY_UNITS.level_1_name,
-                    level_2_name: product.category_level_2_name || null,
-                    level_3_name: product.category_level_3_name || null,
-                    conversion_1_to_2: product.category_conversion_1_to_2 || null,
-                    conversion_2_to_3: product.category_conversion_2_to_3 || null
+                    unit_levels: product.unit_levels || DEFAULT_CATEGORY_UNITS.unit_levels,
+                    level_1_name: product.level_1_name || DEFAULT_CATEGORY_UNITS.level_1_name,
+                    level_2_name: product.level_2_name || null,
+                    level_3_name: product.level_3_name || null,
+                    conversion_1_to_2: product.conversion_1_to_2 || null,
+                    conversion_2_to_3: product.conversion_2_to_3 || null
                 }
             })));
         } catch (err) {
@@ -245,68 +236,37 @@ initializeDatabase().then(() => {
             const {
                 name,
                 generic_name,
-                description,
-                category,
-                price,
-                stock,
-                strips_per_box,
-                tabs_per_strip,
+                category_id,
                 price_per_box,
                 price_per_strip,
                 price_per_tablet,
-                base_stock,
-                unit,
-                defaultQty,
-                photo,
-                expiry_date
+                base_stock
             } = req.body;
 
             // Validate input
-            if (!name || price === undefined) {
-                return res.status(400).json({ message: 'Name and price are required' });
+            if (!name) {
+                return res.status(400).json({ message: 'Product name is required' });
             }
-
-            // Format the expiry date correctly (if provided)
-            const expiry_date_formatted = expiry_date || null;
-            const parsedBaseStock = base_stock ?? stock ?? 0;
 
             const result = await db.run(`
                 INSERT INTO products (
                     name,
                     generic_name,
-                    description,
-                    category,
-                    price,
-                    stock,
-                    strips_per_box,
-                    tabs_per_strip,
+                    category_id,
                     price_per_box,
                     price_per_strip,
                     price_per_tablet,
-                    base_stock,
-                    unit,
-                    default_qty,
-                    photo,
-                    expiry_date
+                    base_stock
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
             `, [
                 name,
                 generic_name || null,
-                description,
-                category,
-                price,
-                stock ?? parsedBaseStock,
-                strips_per_box ?? 1,
-                tabs_per_strip ?? 1,
-                price_per_box ?? 0,
-                price_per_strip ?? 0,
-                price_per_tablet ?? 0,
-                parsedBaseStock,
-                unit,
-                defaultQty || 1,
-                photo,
-                expiry_date_formatted
+                category_id || null,
+                price_per_box || null,
+                price_per_strip || null,
+                price_per_tablet || null,
+                base_stock || 0
             ]);
 
             const newProduct = await db.get('SELECT * FROM products WHERE id = ?', [result.lastID]);
@@ -360,54 +320,32 @@ initializeDatabase().then(() => {
             const {
                 name,
                 generic_name,
-                description,
-                category,
-                price,
-                stock,
-                strips_per_box,
-                tabs_per_strip,
+                category_id,
                 price_per_box,
                 price_per_strip,
                 price_per_tablet,
-                base_stock,
-                unit,
-                defaultQty,
-                photo,
-                expiry_date
+                base_stock
             } = req.body;
             const id = req.params.id;
 
             // Validate input
-            if (!name || price === undefined) {
-                return res.status(400).json({ message: 'Name and price are required' });
+            if (!name) {
+                return res.status(400).json({ message: 'Product name is required' });
             }
-
-            // Format the expiry date correctly (if provided)
-            const expiry_date_formatted = expiry_date || null;
-            const parsedBaseStock = base_stock ?? stock ?? 0;
 
             // Update the product
             await db.run(`
                 UPDATE products 
-                SET name = ?, generic_name = ?, description = ?, category = ?, price = ?, stock = ?, strips_per_box = ?, tabs_per_strip = ?, price_per_box = ?, price_per_strip = ?, price_per_tablet = ?, base_stock = ?, unit = ?, default_qty = ?, photo = ?, expiry_date = ?
+                SET name = ?, generic_name = ?, category_id = ?, price_per_box = ?, price_per_strip = ?, price_per_tablet = ?, base_stock = ?
                 WHERE id = ?
             `, [
                 name,
                 generic_name || null,
-                description,
-                category,
-                price,
-                stock ?? parsedBaseStock,
-                strips_per_box ?? 1,
-                tabs_per_strip ?? 1,
-                price_per_box ?? 0,
-                price_per_strip ?? 0,
-                price_per_tablet ?? 0,
-                parsedBaseStock,
-                unit,
-                defaultQty,
-                photo,
-                expiry_date_formatted,
+                category_id || null,
+                price_per_box || null,
+                price_per_strip || null,
+                price_per_tablet || null,
+                base_stock || 0,
                 id
             ]);
 
@@ -557,13 +495,7 @@ initializeDatabase().then(() => {
                 ]
             );
 
-            // Keep product-category references aligned when category name changes.
-            if (existing.name !== name.trim()) {
-                await db.run(
-                    'UPDATE products SET category = ? WHERE category = ?',
-                    [name.trim(), existing.name]
-                );
-            }
+            // Category name changes don't affect products since we now use category_id (foreign key)
 
             const updated = await db.get('SELECT * FROM categories WHERE id = ?', [id]);
             res.json(updated);
@@ -583,7 +515,7 @@ initializeDatabase().then(() => {
             }
 
             // Check if category has products
-            const products = await db.get('SELECT COUNT(*) as count FROM products WHERE category = ?', category.name);
+            const products = await db.get('SELECT COUNT(*) as count FROM products WHERE category_id = ?', id);
             if (products.count > 0) {
                 return res.status(400).json({ 
                     error: 'Cannot delete category with associated products' 
@@ -610,7 +542,7 @@ initializeDatabase().then(() => {
             
             // Insert sale
             const saleResult = await db.run(`
-                INSERT INTO sales (total, subtotal, discount, date)
+                INSERT INTO sales (total, subtotal, discount, created_at)
                 VALUES (?, ?, ?, datetime('now', 'localtime'))
             `, [total, subtotal, discount || 0]);
             
@@ -619,14 +551,14 @@ initializeDatabase().then(() => {
             // Insert sale items
             for (const item of items) {
                 await db.run(`
-                    INSERT INTO sale_items (sale_id, product_id, quantity, price, name, unit)
-                    VALUES (?, ?, ?, ?, ?, ?)
-                `, [saleId, item.product_id, item.quantity, item.price, item.name, item.unit]);
+                    INSERT INTO sale_items (sale_id, product_id, qty, line_total)
+                    VALUES (?, ?, ?, ?)
+                `, [saleId, item.product_id, item.qty, item.line_total]);
 
                 // Deduct sold quantity from base_stock (smallest unit inventory).
                 await db.run(
                     'UPDATE products SET base_stock = MAX(base_stock - ?, 0) WHERE id = ?',
-                    [item.quantity, item.product_id]
+                    [item.qty, item.product_id]
                 );
             }
             
@@ -719,7 +651,17 @@ initializeDatabase().then(() => {
     // Add this endpoint to your server.js file if it's not already there
     app.get('/api/sales', async (req, res) => {
         try {
-            const sales = await db.all('SELECT * FROM sales ORDER BY date DESC');
+            const sales = await db.all(`
+                SELECT
+                    id,
+                    total,
+                    subtotal,
+                    discount,
+                    created_at,
+                    created_at AS date
+                FROM sales
+                ORDER BY created_at DESC
+            `);
             
             // For each sale, get its items
             for (const sale of sales) {

@@ -5,15 +5,17 @@ import { FaTrash, FaEdit, FaPlus, FaExclamationTriangle, FaCalendarTimes, FaPrin
 import * as XLSX from 'xlsx';
 
 interface ProductData {
-  id: number;
+  id: string | number;
   name: string;
-  description: string;
-  category: string;
-  price: number;
-  stock: number;
-  unit: string;
-  defaultQty: number;
-  photo: string;
+  generic_name?: string;
+  description?: string;
+  category_id?: number;
+  category_name?: string;
+  price_per_box?: number;
+  price_per_strip?: number;
+  price_per_tablet?: number;
+  base_stock: number;
+  unit_config?: any;
   expiry_date?: string;
 }
 
@@ -35,10 +37,10 @@ const InventoryAlerts: React.FC<InventoryAlertsProps> = ({
 
   // Prepare filtered product lists
   const outOfStockProducts = useMemo(() => {
-    return productData.filter(product => product.stock <= 0)
+    return productData.filter(product => (product.base_stock || 0) <= 0)
       .filter(product => 
         product.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        product.category.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        (product.category_name || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
         product.id.toString().includes(searchTerm)
       );
   }, [productData, searchTerm]);
@@ -54,7 +56,7 @@ const InventoryAlerts: React.FC<InventoryAlertsProps> = ({
       return expiryDate <= currentDate;
     }).filter(product => 
       product.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      product.category.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      (product.category_name || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
       product.id.toString().includes(searchTerm)
     );
   }, [productData, searchTerm, currentDate]);
@@ -66,7 +68,7 @@ const InventoryAlerts: React.FC<InventoryAlertsProps> = ({
       return expiryDate > currentDate && expiryDate <= thirtyDaysLater;
     }).filter(product => 
       product.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      product.category.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      (product.category_name || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
       product.id.toString().includes(searchTerm)
     );
   }, [productData, searchTerm, currentDate, thirtyDaysLater]);
@@ -81,35 +83,35 @@ const InventoryAlerts: React.FC<InventoryAlertsProps> = ({
         dataToExport = outOfStockProducts.map(product => ({
           ID: product.id,
           Name: product.name,
-          Category: product.category,
-          Price: `Rs. ${product.price.toFixed(2)}`,
-          Stock: product.stock,
-          Unit: product.unit
+          Category: product.category_name || 'Uncategorized',
+          Price: `Rs. ${(product.price_per_box ?? 0).toFixed(2)}`,
+          Stock: product.base_stock,
+          Unit: product.unit_config?.level_1_name || 'Unit'
         }));
         filename = 'out-of-stock-products.xlsx';
       } else if (activeSection === 'expired') {
         dataToExport = expiredProducts.map(product => ({
           ID: product.id,
           Name: product.name,
-          Category: product.category,
-          Price: `Rs. ${product.price.toFixed(2)}`,
+          Category: product.category_name || 'Uncategorized',
+          Price: `Rs. ${(product.price_per_box ?? 0).toFixed(2)}`,
           'Expiry Date': product.expiry_date ? new Date(product.expiry_date).toLocaleDateString() : 'N/A',
-          Stock: product.stock,
-          Unit: product.unit
+          Stock: product.base_stock,
+          Unit: product.unit_config?.level_1_name || 'Unit'
         }));
         filename = 'expired-products.xlsx';
       } else {
         dataToExport = expiringSoonProducts.map(product => ({
           ID: product.id,
           Name: product.name,
-          Category: product.category,
-          Price: `Rs. ${product.price.toFixed(2)}`,
+          Category: product.category_name || 'Uncategorized',
+          Price: `Rs. ${(product.price_per_box ?? 0).toFixed(2)}`,
           'Expiry Date': product.expiry_date ? new Date(product.expiry_date).toLocaleDateString() : 'N/A',
           'Days Until Expiry': product.expiry_date ? 
             Math.ceil((new Date(product.expiry_date).getTime() - currentDate.getTime()) / (1000 * 60 * 60 * 24)) : 
             'N/A',
-          Stock: product.stock,
-          Unit: product.unit
+          Stock: product.base_stock,
+          Unit: product.unit_config?.level_1_name || 'Unit'
         }));
         filename = 'expiring-soon-products.xlsx';
       }
@@ -210,9 +212,6 @@ const InventoryAlerts: React.FC<InventoryAlertsProps> = ({
                 <td className="px-4 py-2 whitespace-nowrap text-gray-700">{product.id}</td>
                 <td className="px-4 py-2">
                   <div className="flex items-center">
-                    {product.photo && (
-                      <img src={product.photo} alt={product.name} className="h-8 w-8 mr-2 object-cover rounded" />
-                    )}
                     <div>
                       <div className="font-medium text-gray-900">{product.name}</div>
                       {product.description && (
@@ -221,11 +220,11 @@ const InventoryAlerts: React.FC<InventoryAlertsProps> = ({
                     </div>
                   </div>
                 </td>
-                <td className="px-4 py-2 text-gray-700">{product.category || 'Uncategorized'}</td>
-                <td className="px-4 py-2 text-gray-700">Rs. {product.price.toFixed(2)}</td>
+                <td className="px-4 py-2 text-gray-700">{product.category_name || 'Uncategorized'}</td>
+                <td className="px-4 py-2 text-gray-700">Rs. {(product.price_per_box ?? 0).toFixed(2)}</td>
                 <td className="px-4 py-2 text-gray-700">
-                  <span className={product.stock <= 0 ? 'text-red-600 font-bold' : ''}>
-                    {product.stock} {product.unit}
+                  <span className={(product.base_stock || 0) <= 0 ? 'text-red-600 font-bold' : ''}>
+                    {product.base_stock || 0} {product.unit_config?.level_1_name || 'Unit'}
                   </span>
                 </td>
                 {(activeSection === 'expired' || activeSection === 'expiringSoon') && (

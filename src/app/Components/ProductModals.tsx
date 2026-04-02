@@ -171,36 +171,24 @@ const ProductModals: React.FC<ProductModalsProps> = ({
   };
 
   const buildProductPayloadFromDynamicFields = (source: any) => {
+    const categoryConfig = getCategoryConfig(source.category || '');
+    const categoryId = categoryConfig?.id || null;
     const config = getEffectiveConfig(source.category || '');
     const unitLevels = config.unitLevels;
 
     const price1 = parseFloat(source.price_per_level_1 || '0') || 0;
     const price2 = unitLevels >= 2 ? (parseFloat(source.price_per_level_2 || '0') || 0) : 0;
     const price3 = unitLevels === 3 ? (parseFloat(source.price_per_level_3 || '0') || 0) : 0;
-    const conversion1 = unitLevels >= 2
-      ? (parseInt(source.conversion_1_to_2 || String(config.conversion1To2), 10) || config.conversion1To2)
-      : 1;
-    const conversion2 = unitLevels === 3
-      ? (parseInt(source.conversion_2_to_3 || String(config.conversion2To3), 10) || config.conversion2To3)
-      : 1;
     const baseStock = parseInt(source.opening_balance_base || '0', 10) || 0;
 
     return {
       name: source.name,
-      description: source.description || '',
-      category: source.category || 'Uncategorized',
-      price: price1,
-      stock: baseStock,
-      base_stock: baseStock,
-      strips_per_box: conversion1,
-      tabs_per_strip: conversion2,
+      generic_name: source.generic_name || '',
+      category_id: categoryId,
       price_per_box: price1,
-      price_per_strip: unitLevels >= 2 ? price2 : 0,
-      price_per_tablet: unitLevels === 3 ? price3 : (unitLevels === 2 ? price2 : price1),
-      unit: unitLevels === 3 ? config.level3Name : unitLevels === 2 ? config.level2Name : config.level1Name,
-      defaultQty: source.defaultQty || 1,
-      photo: source.photo || '',
-      expiry_date: source.expiry_date || null
+      price_per_strip: unitLevels >= 2 ? price2 : null,
+      price_per_tablet: unitLevels === 3 ? price3 : null,
+      base_stock: baseStock
     };
   };
 

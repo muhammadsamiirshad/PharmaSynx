@@ -11,10 +11,10 @@ import Toast from "../Components/Toast";
 
 // Define interfaces
 interface Product {
-    id: string;
+    id: string | number;
     name: string;
     generic_name?: string;
-    description: string;
+    description?: string;
     category: string;
     price: number;
     stock: number;
@@ -23,7 +23,7 @@ interface Product {
     price_per_box?: number;
     price_per_strip?: number;
     price_per_tablet?: number;
-    base_stock?: number;
+    base_stock: number;
     unit: string;
     unit_config?: {
         unit_levels?: number;
@@ -224,13 +224,13 @@ const POS: React.FC = () => {
 
     const getUnitPrices = useCallback((product: Product) => {
         const config = getUnitConfig(product);
-        const level1Price = product.price_per_box ?? product.price;
+        const level1Price = product.price_per_box ?? 0;
         const level2Price = config.unitLevels >= 2
-            ? (product.price_per_strip ?? (level1Price / config.conversion1To2))
+            ? (product.price_per_strip ?? (level1Price > 0 ? level1Price / config.conversion1To2 : 0))
             : 0;
         const level3Price = config.unitLevels === 3
-            ? (product.price_per_tablet ?? (level2Price / config.conversion2To3))
-            : (config.unitLevels === 2 ? 1 : level1Price);
+            ? (product.price_per_tablet ?? (level2Price > 0 ? level2Price / config.conversion2To3 : 0))
+            : (config.unitLevels === 2 ? level2Price : level1Price);
 
         return { level1Price, level2Price, level3Price };
     }, [getUnitConfig]);
@@ -295,7 +295,7 @@ const POS: React.FC = () => {
 
     // Define calculation functions first before they're used by other functions
     const calculateSubtotal = useCallback(() => {
-        return items.reduce((total, item) => total + item.lineTotal, 0).toFixed(2);
+        return (items.reduce((total, item) => total + (item.lineTotal ?? 0), 0) ?? 0).toFixed(2);
     }, [items]);
 
     const calculateDiscountAmount = useCallback(() => {
@@ -312,7 +312,7 @@ const POS: React.FC = () => {
     const calculateTotal = useCallback(() => {
         const subtotal = parseFloat(calculateSubtotal());
         const finalDiscount = calculateDiscountAmount();
-        return Math.max(0, (subtotal - finalDiscount)).toFixed(2);
+        return Math.max(0, ((subtotal ?? 0) - (finalDiscount ?? 0))).toFixed(2);
     }, [calculateSubtotal, calculateDiscountAmount]);
 
     // Define modal handling functions before they're used
@@ -343,7 +343,7 @@ const POS: React.FC = () => {
             const processedData = data.map((product: any) => ({
                 ...product,
                 photo: product.photo ? processImageUrl(product.photo.toString()) : null,
-                category: product.category_id?.name || product.category || 'Uncategorized'
+                category: product.category_name || 'Uncategorized'
             }));
 
             setProducts(processedData);
@@ -514,14 +514,12 @@ const POS: React.FC = () => {
         }
 
         // Prepare sale data
-        const discountAmount = parseFloat(calculateDiscountAmount().toFixed(2));
+        const discountAmount = parseFloat((calculateDiscountAmount() ?? 0).toFixed(2));
         const saleData = {
             items: items.map(item => ({
                 product_id: item.id,
-                name: item.name,
-                quantity: item.qty,
-                price: item.price,
-                unit: item.unit
+                qty: item.qty,
+                line_total: item.lineTotal
             })),
             total: parseFloat(calculateTotal()),
             subtotal: parseFloat(calculateSubtotal()),
@@ -715,11 +713,11 @@ const POS: React.FC = () => {
             {
               id: product.id,
               name: product.name,
-                            qty: totalBaseQuantity,
-                                                        price: product.price,
-                            lineTotal,
-                            unit: product.unit,
-                            product
+              qty: totalBaseQuantity,
+              price: 0,
+              lineTotal,
+              unit: product.unit,
+              product
             }
           ]);
         }
@@ -1085,7 +1083,7 @@ const POS: React.FC = () => {
                                                         </button>
                                                     </div>
                                                 </td>
-                                                <td className="py-1 px-2 text-right font-medium text-black">Rs. {item.lineTotal.toFixed(2)}</td>
+                                                <td className="py-1 px-2 text-right font-medium text-black">Rs. {(item.lineTotal ?? 0).toFixed(2)}</td>
                                                 <td className="py-1 px-2 text-center">
                                                     <button
                                                         className="p-1.5 text-white bg-red-500 hover:bg-red-700 rounded-full focus:outline-none"
@@ -1338,7 +1336,7 @@ const POS: React.FC = () => {
                                         </div>
                                         <div className="p-2 bg-white">
                                             <h3 className="font-bold text-gray-800 truncate text-[11px]">{product.name}</h3>
-                                            <p className="text-teal-600 font-medium text-[11px]">Rs. {product.price.toFixed(2)}</p>
+                                            <p className="text-teal-600 font-medium text-[11px]">Rs. {(product.price_per_box ?? product.price ?? 0).toFixed(2)}</p>
                                             <div className="mt-1 flex justify-items-center">
                                                 <p className="text-[11px] text-gray-600">
                                                     {getBaseStock(product) > 0 ? (
@@ -1404,7 +1402,7 @@ const POS: React.FC = () => {
                                             <p className="font-semibold text-gray-800">Bill #{index + 1}</p>
                                             <p className="text-sm text-gray-600">Items: {bill.items.length}</p>
                                             <p className="text-sm text-gray-600">
-                                                Total: Rs. {bill.items.reduce((sum, item) => sum + item.lineTotal, 0).toFixed(2)}
+                                                Total: Rs. {(bill.items.reduce((sum, item) => sum + (item.lineTotal ?? 0), 0) ?? 0).toFixed(2)}
                                             </p>
                                             <p className="text-xs text-gray-500">
                                                 Held at: {new Date(bill.createdAt).toLocaleTimeString()}
@@ -1460,21 +1458,34 @@ const POS: React.FC = () => {
                                 ];
 
                                 return rows.filter(row => row.enabled).map((row) => (
-                                    <div key={row.label} className="flex items-center gap-2">
-                                        <button
-                                            type="button"
-                                            onClick={() => row.setValue(Math.max(0, row.value - 1))}
-                                            className="px-2 py-1 rounded bg-gray-200 text-gray-700 hover:bg-gray-300"
-                                        >
-                                            -
-                                        </button>
-                                        <button
-                                            type="button"
-                                            onClick={() => row.setValue(row.value + 1)}
-                                            className="flex-1 px-3 py-2 rounded bg-teal-100 text-teal-800 font-semibold hover:bg-teal-200"
-                                        >
-                                            {row.label}: {row.value}
-                                        </button>
+                                    <div key={row.label} className="space-y-1">
+                                        <p className="text-sm text-gray-700 font-medium">{row.label}</p>
+                                        <div className="flex items-center gap-2">
+                                            <button
+                                                type="button"
+                                                onClick={() => row.setValue(Math.max(0, row.value - 1))}
+                                                className="w-10 h-10 rounded-md bg-gray-200 text-gray-700 hover:bg-gray-300"
+                                            >
+                                                -
+                                            </button>
+                                            <input
+                                                type="number"
+                                                min={0}
+                                                value={row.value}
+                                                onChange={(e) => {
+                                                    const parsed = Number.parseInt(e.target.value, 10);
+                                                    row.setValue(Number.isFinite(parsed) && parsed >= 0 ? parsed : 0);
+                                                }}
+                                                className="w-20 h-10 border border-gray-300 rounded-md text-center text-gray-800"
+                                            />
+                                            <button
+                                                type="button"
+                                                onClick={() => row.setValue(row.value + 1)}
+                                                className="w-10 h-10 rounded-md bg-teal-500 text-white hover:bg-teal-600"
+                                            >
+                                                +
+                                            </button>
+                                        </div>
                                     </div>
                                 ));
                             })()}
@@ -1483,7 +1494,7 @@ const POS: React.FC = () => {
                                 Line Total: Rs. {(() => {
                                     const product = products.find(p => p.id === quantityModal.productId);
                                     if (!product) return '0.00';
-                                    return calculateSelectedLineTotal(product, level1Qty, level2Qty, level3Qty).toFixed(2);
+                                    return (calculateSelectedLineTotal(product, level1Qty, level2Qty, level3Qty) ?? 0).toFixed(2);
                                 })()}
                             </div>
                         </div>
