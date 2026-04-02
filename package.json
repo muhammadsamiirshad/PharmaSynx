@@ -4,6 +4,10 @@
   "private": true,
   "scripts": {
     "dev": "next dev --turbopack",
+    "web": "next dev --turbopack -p 3000",
+    "api": "node server.js",
+    "electron:main": "wait-on tcp:3000 tcp:5000 && electron .",
+    "electron:dev": "concurrently -k -n WEB,API,ELECTRON -c cyan,green,magenta \"npm run web\" \"npm run api\" \"npm run electron:main\"",
     "build": "next build",
     "start": "next start",
     "lint": "next lint"
@@ -27,14 +31,17 @@
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "concurrently": "^9.2.1",
+    "electron": "^41.1.1",
     "eslint": "^9",
     "eslint-config-next": "15.2.1",
     "rimraf": "^6.0.1",
     "tailwindcss": "^4",
-    "typescript": "^5"
+    "typescript": "^5",
+    "wait-on": "^9.0.4"
   },
   "description": "This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).",
-  "main": "index.js",
+  "main": "electron/main.js",
   "keywords": [],
   "author": "",
   "license": "ISC"

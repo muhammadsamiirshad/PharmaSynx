@@ -51,12 +51,9 @@ PharmaSynx is a comprehensive pharmacy management system designed to streamline 
    yarn install
    ```
 
-3. Set up the database:
-   ```bash
-   npm run migrate
-   # or
-   yarn migrate
-   ```
+3. Initialize and run with local SQLite:
+   - The app auto-creates required tables in `pharmacy.db` when `server.js` starts.
+   - If you want a clean database, use `reset-db.js` (see Scripts below).
 
 4. Run the development server:
    ```bash
@@ -99,6 +96,23 @@ Access the Reports section to generate and export various business reports, incl
 
 PharmaSynx can be customized through the Store Settings component to match your pharmacy's specific requirements.
 
+## Database
+
+PharmaSynx uses a local SQLite database file named `pharmacy.db`.
+
+- On server startup, required tables are created automatically if they do not exist.
+- No PostgreSQL, MongoDB, or external migration service is required.
+- Database reset and cleanup are handled through the local reset utility.
+
+## Scripts
+
+Common commands for local development and SQLite maintenance:
+
+- `npm run dev`: Run the app in development mode.
+- `npm run build`: Create a production build.
+- `npm start`: Run the production server.
+- `node reset-db.js`: Clear local database data for a fresh start.
+
 ## Development
 
 ### Project Structure
@@ -114,8 +128,7 @@ PharmaSynx can be customized through the Store Settings component to match your 
 │   │   ├── layout.tsx   # Root layout
 │   │   └── page.tsx     # Home page
 ├── server.js            # Custom server implementation
-├── migrate.js           # Database migration script
-└── reset-db.js          # Database reset utility
+└── reset-db.js          # SQLite database reset utility
 ```
 
 ### Building for Production

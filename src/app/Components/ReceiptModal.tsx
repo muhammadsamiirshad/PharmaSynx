@@ -11,6 +11,8 @@ interface CartItem {
     name: string;
     qty: number;
     price: number;
+    lineTotal?: number;
+    formattedQty?: string;
     unit: string;
 }
 
@@ -170,6 +172,14 @@ const ReceiptModal = ({
         return !isNaN(numberPrice) ? numberPrice.toFixed(2) : '0.00';
     };
 
+    const getDisplayQuantity = (item: CartItem): string => {
+        return item.formattedQty || `${item.qty} ${item.unit}`;
+    };
+
+    const getLineTotal = (item: CartItem): number => {
+        return item.lineTotal ?? (item.qty * item.price);
+    };
+
     const handleSaveAndPrint = async () => {
         try {
             setIsSaving(true);
@@ -321,9 +331,9 @@ const ReceiptModal = ({
                             ${items.map(item => `
                                 <tr>
                                     <td>${item.name}</td>
-                                    <td>${item.qty} ${item.unit}</td>
+                                    <td>${item.formattedQty || `${item.qty} ${item.unit}`}</td>
                                     <td>${storeSettings.currency} ${parseFloat(item.price.toString()).toFixed(2)}</td>
-                                    <td>${storeSettings.currency} ${(item.qty * item.price).toFixed(2)}</td>
+                                    <td>${storeSettings.currency} ${parseFloat((item.lineTotal ?? (item.qty * item.price)).toString()).toFixed(2)}</td>
                                 </tr>
                             `).join('')}
                         </tbody>
@@ -467,10 +477,10 @@ const ReceiptModal = ({
                                 <tr key={index} className="border-b border-dotted text-gray-800 border-gray-300">
                                     <td className="py-1">{item.name}</td>
                                     <td className="text-right py-1">
-                                        {item.qty} {item.unit}
+                                        {getDisplayQuantity(item)}
                                     </td>
                                     <td className="text-right py-1">{storeSettings.currency} {formatPrice(item.price)}</td>
-                                    <td className="text-right py-1">{storeSettings.currency} {formatPrice(item.price * item.qty)}</td>
+                                    <td className="text-right py-1">{storeSettings.currency} {formatPrice(getLineTotal(item))}</td>
                                 </tr>
                             ))}
                         </tbody>

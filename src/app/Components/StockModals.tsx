@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { FaTimes, FaSearch, FaEdit } from 'react-icons/fa';
 
 export interface Product {
@@ -38,6 +38,7 @@ const StockModals: React.FC<StockModalsProps> = ({
   const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(false);
   const [isUpdating, setIsUpdating] = useState(false);
+  const reconnectTimeoutRef = useRef<number | null>(null);
 
   useEffect(() => {
     const fetchProducts = async () => {
@@ -66,37 +67,68 @@ const StockModals: React.FC<StockModalsProps> = ({
 
     fetchProducts();
 
-    // Set up SSE connection for real-time updates
-    const eventSource = new EventSource('http://localhost:5000/api/updates');
-    
-    eventSource.onmessage = (event) => {
-      try {
-        const data = JSON.parse(event.data);
-        if (data.type === 'product_update') {
-          setProducts(prevProducts => {
-            const index = prevProducts.findIndex(p => p.id === data.product.id);
-            if (index >= 0) {
-              const updatedProducts = [...prevProducts];
-              updatedProducts[index] = {
-                ...data.product,
-                category: data.product.category || 'Uncategorized'
-              };
-              return updatedProducts;
-            }
-            return prevProducts;
-          });
+    if (!showStockModal) {
+      return;
+    }
+
+    let eventSource: EventSource | null = null;
+
+    const connectSSE = () => {
+      eventSource = new EventSource('http://localhost:5000/api/products/updates');
+
+      eventSource.onmessage = (event) => {
+        try {
+          const payload = JSON.parse(event.data);
+          const eventType = payload?.type;
+          const eventData = payload?.data ?? payload;
+          const updatedProduct = eventData?.product;
+
+          if (eventType === 'product_update' && updatedProduct) {
+            setProducts(prevProducts => {
+              const index = prevProducts.findIndex(
+                p => String(p.id) === String(updatedProduct.id)
+              );
+
+              if (index >= 0) {
+                const updatedProducts = [...prevProducts];
+                updatedProducts[index] = {
+                  ...updatedProduct,
+                  category: updatedProduct.category || 'Uncategorized'
+                };
+                return updatedProducts;
+              }
+
+              return [
+                ...prevProducts,
+                {
+                  ...updatedProduct,
+                  category: updatedProduct.category || 'Uncategorized'
+                }
+              ];
+            });
+          }
+        } catch (error) {
+          console.error('Error processing update:', error);
         }
-      } catch (error) {
-        console.error('Error processing update:', error);
-      }
+      };
+
+      eventSource.onerror = () => {
+        eventSource?.close();
+        if (reconnectTimeoutRef.current) {
+          window.clearTimeout(reconnectTimeoutRef.current);
+        }
+        reconnectTimeoutRef.current = window.setTimeout(connectSSE, 3000);
+      };
     };
 
-    eventSource.onerror = () => {
-      eventSource.close();
-    };
+    connectSSE();
 
     return () => {
-      eventSource.close();
+      eventSource?.close();
+      if (reconnectTimeoutRef.current) {
+        window.clearTimeout(reconnectTimeoutRef.current);
+        reconnectTimeoutRef.current = null;
+      }
     };
   }, [showStockModal]);
 

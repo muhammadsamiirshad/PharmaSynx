@@ -22,10 +22,17 @@ async function resetDatabase() {
             CREATE TABLE products (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 name TEXT NOT NULL,
+                generic_name TEXT,
                 description TEXT,
                 category TEXT,
                 price REAL NOT NULL,
                 stock INTEGER DEFAULT 0,
+                strips_per_box INTEGER DEFAULT 1,
+                tabs_per_strip INTEGER DEFAULT 1,
+                price_per_box REAL DEFAULT 0,
+                price_per_strip REAL DEFAULT 0,
+                price_per_tablet REAL DEFAULT 0,
+                base_stock INTEGER DEFAULT 0,
                 unit TEXT DEFAULT 'pcs',
                 default_qty INTEGER DEFAULT 1,
                 photo TEXT,
@@ -64,13 +71,28 @@ async function resetDatabase() {
         // Insert some sample products for testing
         console.log('Inserting sample data...');
         await db.run(`
-            INSERT INTO products (name, description, category, price, stock, unit, default_qty, expiry_date)
+            INSERT INTO products (
+                name,
+                generic_name,
+                description,
+                category,
+                price,
+                strips_per_box,
+                tabs_per_strip,
+                price_per_box,
+                price_per_strip,
+                price_per_tablet,
+                base_stock,
+                unit,
+                default_qty,
+                expiry_date
+            )
             VALUES 
-            ('Paracetamol', 'Pain reliever 500mg', 'Analgesics', 10.99, 100, 'tabs', 10, '2025-12-31'),
-            ('Ibuprofen', 'Anti-inflammatory 400mg', 'Analgesics', 15.50, 50, 'tabs', 10, '2024-08-15'),
-            ('Amoxicillin', 'Antibiotic 250mg', 'Antibiotics', 25.00, 30, 'caps', 1, '2025-06-30'),
-            ('Cetirizine', 'Antihistamine 10mg', 'Allergy', 8.75, 40, 'tabs', 10, '2026-03-25'),
-            ('Vitamin C', 'Supplement 1000mg', 'Vitamins', 12.99, 80, 'tabs', 5, '2027-01-10')
+            ('Panadol', 'Paracetamol', 'Pain reliever 500mg', 'Analgesics', 39.00, 10, 10, 39.00, 3.90, 0.39, 1000, 'box', 1, '2027-12-31'),
+            ('Brufen', 'Ibuprofen', 'Anti-inflammatory 400mg', 'Analgesics', 55.00, 10, 10, 55.00, 5.50, 0.55, 500, 'box', 1, '2027-08-15'),
+            ('Amoxil', 'Amoxicillin', 'Antibiotic 250mg', 'Antibiotics', 250.00, 10, 10, 250.00, 25.00, 2.50, 300, 'box', 1, '2027-06-30'),
+            ('Zyrtec', 'Cetirizine', 'Antihistamine 10mg', 'Allergy', 32.00, 10, 10, 32.00, 3.20, 0.32, 400, 'box', 1, '2028-03-25'),
+            ('Ceevit', 'Ascorbic Acid', 'Vitamin C 1000mg supplement', 'Vitamins', 65.00, 10, 10, 65.00, 6.50, 0.65, 800, 'box', 1, '2028-01-10')
         `);
         
         console.log('Database reset successfully');

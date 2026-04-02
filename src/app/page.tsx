@@ -12,12 +12,12 @@ const POS = dynamic(() => import('./pages/POS'), {
 export default function Home() {
     return (
         <ClientOnly>
-            <div className="flex flex-col h-screen bg-teal-700 overflow-hidden">
+            <div className="flex flex-col h-screen w-full max-w-full overflow-hidden bg-teal-700">
                 {/* Common Header */}
                 <CommonHeader activePage="home" />
                 
                 {/* Main content */}
-                <main className="flex-grow overflow-auto">
+                <main className="flex-grow w-full max-w-full px-2 overflow-hidden">
                     <POS />
                 </main>
             </div>

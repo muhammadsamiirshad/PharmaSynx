@@ -14,7 +14,7 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en" suppressHydrationWarning>
-      <body className={geist.className} suppressHydrationWarning>
+      <body className={`${geist.className} w-full overflow-x-hidden`} suppressHydrationWarning>
         {children}
       </body>
     </html>

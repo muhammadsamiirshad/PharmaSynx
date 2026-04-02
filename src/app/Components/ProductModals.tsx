@@ -13,10 +13,33 @@ export interface Product {
   category: string;  // Changed from category_id
   price: number;
   stock: number;
+  base_stock?: number;
+  strips_per_box?: number;
+  tabs_per_strip?: number;
+  price_per_box?: number;
+  price_per_strip?: number;
+  price_per_tablet?: number;
+  price_per_level_1?: string;
+  price_per_level_2?: string;
+  price_per_level_3?: string;
+  conversion_1_to_2?: string;
+  conversion_2_to_3?: string;
+  opening_balance_base?: string;
   unit: string;
   defaultQty: number;
   photo: string;
   expiry_date: string; // Changed from expiryDate to match SQLite
+}
+
+interface CategoryConfig {
+  id: number;
+  name: string;
+  unit_levels: number;
+  level_1_name: string;
+  level_2_name?: string | null;
+  level_3_name?: string | null;
+  conversion_1_to_2?: number | null;
+  conversion_2_to_3?: number | null;
 }
 
 // Update the ProductModalsProps interface to include a new prop
@@ -43,7 +66,12 @@ const ProductModals: React.FC<ProductModalsProps> = ({
     name: '',
     description: '',
     category: '',  // Changed from category_id
-    price: '',
+    price_per_level_1: '',
+    price_per_level_2: '',
+    price_per_level_3: '',
+    conversion_1_to_2: '',
+    conversion_2_to_3: '',
+    opening_balance_base: '',
     unit: '',
     defaultQty: 1,
     photo: '',
@@ -55,6 +83,7 @@ const ProductModals: React.FC<ProductModalsProps> = ({
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
   const [showEditModal, setShowEditModal] = useState(false);
   const [mounted, setMounted] = useState(false);
+  const [categories, setCategories] = useState<CategoryConfig[]>([]);
 
   // Define closeAllModals function here so it's available in all modes
   const closeAllModals = () => {
@@ -73,7 +102,17 @@ const ProductModals: React.FC<ProductModalsProps> = ({
   // Add this useEffect to handle editing products from dashboard
   useEffect(() => {
     if (productToEdit) {
-      setEditingProduct(productToEdit);
+      const unitLevels = Math.min(3, Math.max(1, Number((productToEdit as any).unit_config?.unit_levels ?? 1)));
+      const p = productToEdit as any;
+      setEditingProduct({
+        ...productToEdit,
+        price_per_level_1: String(p.price_per_box ?? p.price ?? ''),
+        price_per_level_2: unitLevels >= 2 ? String(p.price_per_strip ?? '') : '',
+        price_per_level_3: unitLevels === 3 ? String(p.price_per_tablet ?? '') : '',
+        conversion_1_to_2: unitLevels >= 2 ? String((p.unit_config?.conversion_1_to_2 ?? p.strips_per_box ?? '')) : '',
+        conversion_2_to_3: unitLevels === 3 ? String((p.unit_config?.conversion_2_to_3 ?? p.tabs_per_strip ?? '')) : '',
+        opening_balance_base: String(p.base_stock ?? p.stock ?? 0)
+      });
       setShowEditModal(true);
     }
   }, [productToEdit]);
@@ -92,6 +131,105 @@ const ProductModals: React.FC<ProductModalsProps> = ({
       fetchProducts();
     }
   }, [showListModal]);
+
+  useEffect(() => {
+    const fetchCategories = async () => {
+      try {
+        const response = await fetch('http://localhost:5000/api/categories');
+        if (!response.ok) throw new Error('Failed to fetch categories');
+        const data = await response.json();
+        setCategories(data);
+      } catch (err) {
+        console.error('Error loading categories:', err);
+      }
+    };
+
+    fetchCategories();
+  }, []);
+
+  const getCategoryConfig = (categoryName: string): CategoryConfig | undefined => {
+    return categories.find((c) => c.name === categoryName);
+  };
+
+  const getEffectiveConfig = (categoryName: string) => {
+    const config = getCategoryConfig(categoryName);
+    const unitLevels = Math.min(3, Math.max(1, Number(config?.unit_levels ?? 1)));
+    const level1Name = config?.level_1_name || 'Unit';
+    const level2Name = config?.level_2_name || 'Sub Unit';
+    const level3Name = config?.level_3_name || 'Item';
+    const conversion1To2 = Math.max(1, Number(config?.conversion_1_to_2 ?? 1));
+    const conversion2To3 = Math.max(1, Number(config?.conversion_2_to_3 ?? 1));
+
+    return {
+      unitLevels,
+      level1Name,
+      level2Name,
+      level3Name,
+      conversion1To2,
+      conversion2To3
+    };
+  };
+
+  const buildProductPayloadFromDynamicFields = (source: any) => {
+    const config = getEffectiveConfig(source.category || '');
+    const unitLevels = config.unitLevels;
+
+    const price1 = parseFloat(source.price_per_level_1 || '0') || 0;
+    const price2 = unitLevels >= 2 ? (parseFloat(source.price_per_level_2 || '0') || 0) : 0;
+    const price3 = unitLevels === 3 ? (parseFloat(source.price_per_level_3 || '0') || 0) : 0;
+    const conversion1 = unitLevels >= 2
+      ? (parseInt(source.conversion_1_to_2 || String(config.conversion1To2), 10) || config.conversion1To2)
+      : 1;
+    const conversion2 = unitLevels === 3
+      ? (parseInt(source.conversion_2_to_3 || String(config.conversion2To3), 10) || config.conversion2To3)
+      : 1;
+    const baseStock = parseInt(source.opening_balance_base || '0', 10) || 0;
+
+    return {
+      name: source.name,
+      description: source.description || '',
+      category: source.category || 'Uncategorized',
+      price: price1,
+      stock: baseStock,
+      base_stock: baseStock,
+      strips_per_box: conversion1,
+      tabs_per_strip: conversion2,
+      price_per_box: price1,
+      price_per_strip: unitLevels >= 2 ? price2 : 0,
+      price_per_tablet: unitLevels === 3 ? price3 : (unitLevels === 2 ? price2 : price1),
+      unit: unitLevels === 3 ? config.level3Name : unitLevels === 2 ? config.level2Name : config.level1Name,
+      defaultQty: source.defaultQty || 1,
+      photo: source.photo || '',
+      expiry_date: source.expiry_date || null
+    };
+  };
+
+  const handleNewCategoryChange = (categoryName: string) => {
+    const config = getEffectiveConfig(categoryName);
+    setNewProduct((prev) => ({
+      ...prev,
+      category: categoryName,
+      unit: config.unitLevels === 3 ? config.level3Name : config.unitLevels === 2 ? config.level2Name : config.level1Name,
+      conversion_1_to_2: config.unitLevels >= 2 ? String(config.conversion1To2) : '',
+      conversion_2_to_3: config.unitLevels === 3 ? String(config.conversion2To3) : '',
+      price_per_level_2: config.unitLevels >= 2 ? prev.price_per_level_2 : '',
+      price_per_level_3: config.unitLevels === 3 ? prev.price_per_level_3 : ''
+    }));
+  };
+
+  const handleEditingCategoryChange = (categoryName: string) => {
+    if (!editingProduct) return;
+    const config = getEffectiveConfig(categoryName);
+    setEditingProduct({
+      ...editingProduct,
+      category: categoryName,
+      unit: config.unitLevels === 3 ? config.level3Name : config.unitLevels === 2 ? config.level2Name : config.level1Name,
+      conversion_1_to_2: config.unitLevels >= 2 ? String(config.conversion1To2) : '',
+      conversion_2_to_3: config.unitLevels === 3 ? String(config.conversion2To3) : '',
+      price_per_level_2: config.unitLevels >= 2 ? (editingProduct.price_per_level_2 || '') : '',
+      price_per_level_3: config.unitLevels === 3 ? (editingProduct.price_per_level_3 || '') : ''
+    });
+  };
 
   const fetchProducts = async () => {
     try {
@@ -128,23 +266,17 @@ const ProductModals: React.FC<ProductModalsProps> = ({
         return;
       }
 
-      if (!newProduct.price || isNaN(parseFloat(newProduct.price.toString()))) {
-        setError('Valid price is required');
+      if (!newProduct.category) {
+        setError('Category is required');
         return;
       }
 
-      // Create a proper product object with correctly typed values
-      const productToAdd = {
-        name: newProduct.name,
-        description: newProduct.description || '',
-        category: newProduct.category || 'Uncategorized',
-        price: parseFloat(newProduct.price.toString()),
-        stock: 0, // Default to 0 stock for new products
-        unit: newProduct.unit || 'pcs',
-        defaultQty: newProduct.defaultQty || 1,
-        photo: newProduct.photo || '',
-        expiry_date: newProduct.expiry_date || null // Make sure this is sent properly
-      };
+      if (!newProduct.price_per_level_1 || isNaN(parseFloat(newProduct.price_per_level_1.toString()))) {
+        setError('Valid Level 1 price is required');
+        return;
+      }
+
+      const productToAdd = buildProductPayloadFromDynamicFields(newProduct);
 
       console.log('Adding product with data:', productToAdd, 'Expiry date:', productToAdd.expiry_date);
 
@@ -168,7 +300,12 @@ const ProductModals: React.FC<ProductModalsProps> = ({
         name: '',
         description: '',
         category: '',
-        price: '',
+        price_per_level_1: '',
+        price_per_level_2: '',
+        price_per_level_3: '',
+        conversion_1_to_2: '',
+        conversion_2_to_3: '',
+        opening_balance_base: '',
         unit: '',
         defaultQty: 1,
         photo: '',
@@ -247,20 +384,9 @@ const ProductModals: React.FC<ProductModalsProps> = ({
     if (!editingProduct) return;
 
     try {
-      // Create a clean object with properly typed values
       const updatedProduct = {
         id: editingProduct.id,
-        name: editingProduct.name,
-        description: editingProduct.description || '',
-        category: editingProduct.category || 'Uncategorized',
-        price: typeof editingProduct.price === 'string' 
-          ? parseFloat(editingProduct.price) 
-          : editingProduct.price,
-        stock: editingProduct.stock,
-        unit: editingProduct.unit,
-        defaultQty: editingProduct.defaultQty,
-        photo: editingProduct.photo || '',
-        expiry_date: editingProduct.expiry_date || null // Ensure expiry_date is properly sent
+        ...buildProductPayloadFromDynamicFields(editingProduct)
       };
 
       console.log('Updating product with data:', updatedProduct); // Debug log
@@ -405,51 +531,122 @@ const ProductModals: React.FC<ProductModalsProps> = ({
             
             <div className="mb-4">
               <label className="block text-gray-700 mb-2">Category</label>
-              <input
-                type="text"
+              <select
                 value={editingProduct.category}
-                onChange={(e) => setEditingProduct({...editingProduct, category: e.target.value})}
+                onChange={(e) => handleEditingCategoryChange(e.target.value)}
                 className="w-full px-3 py-2 border rounded text-gray-700"
-              />
+                required
+              >
+                <option value="">Select category</option>
+                {categories.map((category) => (
+                  <option key={category.id} value={category.name}>{category.name}</option>
+                ))}
+              </select>
             </div>
-            
-            <div className="grid grid-cols-2 gap-4">
-              <div className="mb-4">
-                <label className="block text-gray-700 mb-2">Price</label>
-                <input
-                  type="number"
-                  value={typeof editingProduct.price === 'string' ? editingProduct.price : editingProduct.price.toString()}
-                  onChange={(e) => setEditingProduct({...editingProduct, price: parseFloat(e.target.value) || 0})}
-                  className="w-full px-3 py-2 border rounded text-gray-700"
-                  min="0"
-                  step="0.01"
-                  required
-                />
-              </div>
-              
-              <div className="mb-4">
-                <label className="block text-gray-700 mb-2">Unit</label>
-                <input
-                  type="text"
-                  value={editingProduct.unit}
-                  onChange={(e) => setEditingProduct({...editingProduct, unit: e.target.value})}
-                  className="w-full px-3 py-2 border rounded text-gray-700"
-                  required
-                />
-              </div>
-              
-              
-              
-              <div className="mb-4">
-                <label className="block text-gray-700 mb-2">Expiry Date</label>
-                <input
-                  type="date"
-                  value={editingProduct.expiry_date || ''}
-                  onChange={(e) => setEditingProduct({...editingProduct, expiry_date: e.target.value})}
-                  className="w-full px-3 py-2 border rounded text-gray-700"
-                />
-              </div>
-            </div>
+
+            {editingProduct.category && (() => {
+              const cfg = getEffectiveConfig(editingProduct.category);
+              const smallestUnit = cfg.unitLevels === 3 ? cfg.level3Name : cfg.unitLevels === 2 ? cfg.level2Name : cfg.level1Name;
+              return (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="mb-4">
+                    <label className="block text-gray-700 mb-2">Price per {cfg.level1Name}</label>
+                    <input
+                      type="number"
+                      value={editingProduct.price_per_level_1 || ''}
+                      onChange={(e) => setEditingProduct({...editingProduct, price_per_level_1: e.target.value})}
+                      className="w-full px-3 py-2 border rounded text-gray-700"
+                      min="0"
+                      step="0.01"
+                      required
+                    />
+                  </div>
+
+                  {cfg.unitLevels >= 2 && (
+                    <div className="mb-4">
+                      <label className="block text-gray-700 mb-2">Price per {cfg.level2Name}</label>
+                      <input
+                        type="number"
+                        value={editingProduct.price_per_level_2 || ''}
+                        onChange={(e) => setEditingProduct({...editingProduct, price_per_level_2: e.target.value})}
+                        className="w-full px-3 py-2 border rounded text-gray-700"
+                        min="0"
+                        step="0.01"
+                        required
+                      />
+                    </div>
+                  )}
+
+                  {cfg.unitLevels === 3 && (
+                    <div className="mb-4">
+                      <label className="block text-gray-700 mb-2">Price per {cfg.level3Name}</label>
+                      <input
+                        type="number"
+                        value={editingProduct.price_per_level_3 || ''}
+                        onChange={(e) => setEditingProduct({...editingProduct, price_per_level_3: e.target.value})}
+                        className="w-full px-3 py-2 border rounded text-gray-700"
+                        min="0"
+                        step="0.01"
+                        required
+                      />
+                    </div>
+                  )}
+
+                  {cfg.unitLevels > 1 && (
+                    <div className="mb-4">
+                      <label className="block text-gray-700 mb-2">{cfg.level2Name} per {cfg.level1Name}</label>
+                      <input
+                        type="number"
+                        value={editingProduct.conversion_1_to_2 || ''}
+                        onChange={(e) => setEditingProduct({...editingProduct, conversion_1_to_2: e.target.value})}
+                        className="w-full px-3 py-2 border rounded text-gray-700"
+                        min="1"
+                        step="1"
+                        required
+                      />
+                    </div>
+                  )}
+
+                  {cfg.unitLevels === 3 && (
+                    <div className="mb-4">
+                      <label className="block text-gray-700 mb-2">{cfg.level3Name} per {cfg.level2Name}</label>
+                      <input
+                        type="number"
+                        value={editingProduct.conversion_2_to_3 || ''}
+                        onChange={(e) => setEditingProduct({...editingProduct, conversion_2_to_3: e.target.value})}
+                        className="w-full px-3 py-2 border rounded text-gray-700"
+                        min="1"
+                        step="1"
+                        required
+                      />
+                    </div>
+                  )}
+
+                  <div className="mb-4">
+                    <label className="block text-gray-700 mb-2">Opening Balance ({smallestUnit})</label>
+                    <input
+                      type="number"
+                      value={editingProduct.opening_balance_base || ''}
+                      onChange={(e) => setEditingProduct({...editingProduct, opening_balance_base: e.target.value})}
+                      className="w-full px-3 py-2 border rounded text-gray-700"
+                      min="0"
+                      step="1"
+                      required
+                    />
+                  </div>
+
+                  <div className="mb-4">
+                    <label className="block text-gray-700 mb-2">Expiry Date</label>
+                    <input
+                      type="date"
+                      value={editingProduct.expiry_date || ''}
+                      onChange={(e) => setEditingProduct({...editingProduct, expiry_date: e.target.value})}
+                      className="w-full px-3 py-2 border rounded text-gray-700"
+                    />
+                  </div>
+                </div>
+              );
+            })()}
             
             <div className="mb-4">
               <label className="block text-gray-700 mb-2">
@@ -568,53 +765,125 @@ const ProductModals: React.FC<ProductModalsProps> = ({
               
               <div className="mb-4">
                 <label className="block text-gray-700 mb-2">Category</label>
-                <input
-                  type="text"
+                <select
                   value={newProduct.category}
-                  onChange={(e) => setNewProduct({...newProduct, category: e.target.value})}
+                  onChange={(e) => handleNewCategoryChange(e.target.value)}
                   className="w-full px-3 py-2 border rounded text-gray-700"
-                  placeholder="Category name"
-                />
+                  required
+                >
+                  <option value="">Select category</option>
+                  {categories.map((category) => (
+                    <option key={category.id} value={category.name}>{category.name}</option>
+                  ))}
+                </select>
               </div>
-              
-              <div className="grid grid-cols-2 gap-4">
-                <div className="mb-4">
-                  <label className="block text-gray-700 mb-2">Price</label>
-                  <input
-                    type="number"
-                    value={newProduct.price}
-                    onChange={(e) => setNewProduct({...newProduct, price: e.target.value})}
-                    className="w-full px-3 py-2 border rounded text-gray-700"
-                    placeholder="0.00"
-                    min="0"
-                    step="0.01"
-                    required
-                  />
-                </div>
-                
-                <div className="mb-4">
-                  <label className="block text-gray-700 mb-2">Unit</label>
-                  <input
-                    type="text"
-                    value={newProduct.unit}
-                    onChange={(e) => setNewProduct({...newProduct, unit: e.target.value})}
-                    className="w-full px-3 py-2 border rounded text-gray-700"
-                    placeholder="e.g., tablet, bottle"
-                  />
-                </div>
-                
-               
-                
-                <div className="mb-4">
-                  <label className="block text-gray-700 mb-2">Expiry Date</label>
-                  <input
-                    type="date"
-                    value={newProduct.expiry_date}
-                    onChange={(e) => setNewProduct({...newProduct, expiry_date: e.target.value})}
-                    className="w-full px-3 py-2 border rounded text-gray-700"
-                  />
-                </div>
-              </div>
+
+              {newProduct.category && (() => {
+                const cfg = getEffectiveConfig(newProduct.category);
+                const smallestUnit = cfg.unitLevels === 3 ? cfg.level3Name : cfg.unitLevels === 2 ? cfg.level2Name : cfg.level1Name;
+                return (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="mb-4">
+                      <label className="block text-gray-700 mb-2">Price per {cfg.level1Name}</label>
+                      <input
+                        type="number"
+                        value={newProduct.price_per_level_1}
+                        onChange={(e) => setNewProduct({...newProduct, price_per_level_1: e.target.value})}
+                        className="w-full px-3 py-2 border rounded text-gray-700"
+                        placeholder="0.00"
+                        min="0"
+                        step="0.01"
+                        required
+                      />
+                    </div>
+
+                    {cfg.unitLevels >= 2 && (
+                      <div className="mb-4">
+                        <label className="block text-gray-700 mb-2">Price per {cfg.level2Name}</label>
+                        <input
+                          type="number"
+                          value={newProduct.price_per_level_2}
+                          onChange={(e) => setNewProduct({...newProduct, price_per_level_2: e.target.value})}
+                          className="w-full px-3 py-2 border rounded text-gray-700"
+                          placeholder="0.00"
+                          min="0"
+                          step="0.01"
+                          required
+                        />
+                      </div>
+                    )}
+
+                    {cfg.unitLevels === 3 && (
+                      <div className="mb-4">
+                        <label className="block text-gray-700 mb-2">Price per {cfg.level3Name}</label>
+                        <input
+                          type="number"
+                          value={newProduct.price_per_level_3}
+                          onChange={(e) => setNewProduct({...newProduct, price_per_level_3: e.target.value})}
+                          className="w-full px-3 py-2 border rounded text-gray-700"
+                          placeholder="0.00"
+                          min="0"
+                          step="0.01"
+                          required
+                        />
+                      </div>
+                    )}
+
+                    {cfg.unitLevels > 1 && (
+                      <div className="mb-4">
+                        <label className="block text-gray-700 mb-2">{cfg.level2Name} per {cfg.level1Name}</label>
+                        <input
+                          type="number"
+                          value={newProduct.conversion_1_to_2}
+                          onChange={(e) => setNewProduct({...newProduct, conversion_1_to_2: e.target.value})}
+                          className="w-full px-3 py-2 border rounded text-gray-700"
+                          min="1"
+                          step="1"
+                          required
+                        />
+                      </div>
+                    )}
+
+                    {cfg.unitLevels === 3 && (
+                      <div className="mb-4">
+                        <label className="block text-gray-700 mb-2">{cfg.level3Name} per {cfg.level2Name}</label>
+                        <input
+                          type="number"
+                          value={newProduct.conversion_2_to_3}
+                          onChange={(e) => setNewProduct({...newProduct, conversion_2_to_3: e.target.value})}
+                          className="w-full px-3 py-2 border rounded text-gray-700"
+                          min="1"
+                          step="1"
+                          required
+                        />
+                      </div>
+                    )}
+
+                    <div className="mb-4">
+                      <label className="block text-gray-700 mb-2">Opening Balance ({smallestUnit})</label>
+                      <input
+                        type="number"
+                        value={newProduct.opening_balance_base}
+                        onChange={(e) => setNewProduct({...newProduct, opening_balance_base: e.target.value})}
+                        className="w-full px-3 py-2 border rounded text-gray-700"
+                        min="0"
+                        step="1"
+                        required
+                      />
+                    </div>
+
+                    <div className="mb-4">
+                      <label className="block text-gray-700 mb-2">Expiry Date</label>
+                      <input
+                        type="date"
+                        value={newProduct.expiry_date}
+                        onChange={(e) => setNewProduct({...newProduct, expiry_date: e.target.value})}
+                        className="w-full px-3 py-2 border rounded text-gray-700"
+                      />
+                    </div>
+                  </div>
+                );
+              })()}
               
               <div className="mb-4">
                 <label className="block text-gray-700 mb-2">
@@ -733,51 +1002,122 @@ const ProductModals: React.FC<ProductModalsProps> = ({
               
               <div className="mb-4">
                 <label className="block text-gray-700 mb-2">Category</label>
-                <input
-                  type="text"
+                <select
                   value={editingProduct.category}
-                  onChange={(e) => setEditingProduct({...editingProduct, category: e.target.value})}
+                  onChange={(e) => handleEditingCategoryChange(e.target.value)}
                   className="w-full px-3 py-2 border rounded text-gray-700"
-              />
+                  required
+                >
+                  <option value="">Select category</option>
+                  {categories.map((category) => (
+                    <option key={category.id} value={category.name}>{category.name}</option>
+                  ))}
+                </select>
               </div>
-              
-              <div className="grid grid-cols-2 gap-4">
-                <div className="mb-4">
-                  <label className="block text-gray-700 mb-2">Price</label>
-                  <input
-                    type="number"
-                    value={typeof editingProduct.price === 'string' ? editingProduct.price : editingProduct.price.toString()}
-                    onChange={(e) => setEditingProduct({...editingProduct, price: parseFloat(e.target.value) || 0})}
-                    className="w-full px-3 py-2 border rounded text-gray-700"
-                    min="0"
-                    step="0.01"
-                    required
-                  />
-                </div>
-                
-                <div className="mb-4">
-                  <label className="block text-gray-700 mb-2">Unit</label>
-                  <input
-                    type="text"
-                    value={editingProduct.unit}
-                    onChange={(e) => setEditingProduct({...editingProduct, unit: e.target.value})}
-                    className="w-full px-3 py-2 border rounded text-gray-700"
-                    required
-                  />
-                </div>
-                
-                
-                
-                <div className="mb-4">
-                  <label className="block text-gray-700 mb-2">Expiry Date</label>
-                  <input
-                    type="date"
-                    value={editingProduct.expiry_date || ''}
-                    onChange={(e) => setEditingProduct({...editingProduct, expiry_date: e.target.value})}
-                    className="w-full px-3 py-2 border rounded text-gray-700"
-                  />
-                </div>
-              </div>
+
+              {editingProduct.category && (() => {
+                const cfg = getEffectiveConfig(editingProduct.category);
+                const smallestUnit = cfg.unitLevels === 3 ? cfg.level3Name : cfg.unitLevels === 2 ? cfg.level2Name : cfg.level1Name;
+                return (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="mb-4">
+                      <label className="block text-gray-700 mb-2">Price per {cfg.level1Name}</label>
+                      <input
+                        type="number"
+                        value={editingProduct.price_per_level_1 || ''}
+                        onChange={(e) => setEditingProduct({...editingProduct, price_per_level_1: e.target.value})}
+                        className="w-full px-3 py-2 border rounded text-gray-700"
+                        min="0"
+                        step="0.01"
+                        required
+                      />
+                    </div>
+
+                    {cfg.unitLevels >= 2 && (
+                      <div className="mb-4">
+                        <label className="block text-gray-700 mb-2">Price per {cfg.level2Name}</label>
+                        <input
+                          type="number"
+                          value={editingProduct.price_per_level_2 || ''}
+                          onChange={(e) => setEditingProduct({...editingProduct, price_per_level_2: e.target.value})}
+                          className="w-full px-3 py-2 border rounded text-gray-700"
+                          min="0"
+                          step="0.01"
+                          required
+                        />
+                      </div>
+                    )}
+
+                    {cfg.unitLevels === 3 && (
+                      <div className="mb-4">
+                        <label className="block text-gray-700 mb-2">Price per {cfg.level3Name}</label>
+                        <input
+                          type="number"
+                          value={editingProduct.price_per_level_3 || ''}
+                          onChange={(e) => setEditingProduct({...editingProduct, price_per_level_3: e.target.value})}
+                          className="w-full px-3 py-2 border rounded text-gray-700"
+                          min="0"
+                          step="0.01"
+                          required
+                        />
+                      </div>
+                    )}
+
+                    {cfg.unitLevels > 1 && (
+                      <div className="mb-4">
+                        <label className="block text-gray-700 mb-2">{cfg.level2Name} per {cfg.level1Name}</label>
+                        <input
+                          type="number"
+                          value={editingProduct.conversion_1_to_2 || ''}
+                          onChange={(e) => setEditingProduct({...editingProduct, conversion_1_to_2: e.target.value})}
+                          className="w-full px-3 py-2 border rounded text-gray-700"
+                          min="1"
+                          step="1"
+                          required
+                        />
+                      </div>
+                    )}
+
+                    {cfg.unitLevels === 3 && (
+                      <div className="mb-4">
+                        <label className="block text-gray-700 mb-2">{cfg.level3Name} per {cfg.level2Name}</label>
+                        <input
+                          type="number"
+                          value={editingProduct.conversion_2_to_3 || ''}
+                          onChange={(e) => setEditingProduct({...editingProduct, conversion_2_to_3: e.target.value})}
+                          className="w-full px-3 py-2 border rounded text-gray-700"
+                          min="1"
+                          step="1"
+                          required
+                        />
+                      </div>
+                    )}
+
+                    <div className="mb-4">
+                      <label className="block text-gray-700 mb-2">Opening Balance ({smallestUnit})</label>
+                      <input
+                        type="number"
+                        value={editingProduct.opening_balance_base || ''}
+                        onChange={(e) => setEditingProduct({...editingProduct, opening_balance_base: e.target.value})}
+                        className="w-full px-3 py-2 border rounded text-gray-700"
+                        min="0"
+                        step="1"
+                        required
+                      />
+                    </div>
+
+                    <div className="mb-4">
+                      <label className="block text-gray-700 mb-2">Expiry Date</label>
+                      <input
+                        type="date"
+                        value={editingProduct.expiry_date || ''}
+                        onChange={(e) => setEditingProduct({...editingProduct, expiry_date: e.target.value})}
+                        className="w-full px-3 py-2 border rounded text-gray-700"
+                      />
+                    </div>
+                  </div>
+                );
+              })()}
               
               <div className="mb-4">
                 <label className="block text-gray-700 mb-2">
