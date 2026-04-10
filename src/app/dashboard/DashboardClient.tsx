@@ -1,19 +1,19 @@
 "use client";
 
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import dynamic from 'next/dynamic';
 import * as XLSX from 'xlsx';
 import ClientOnly from '../Components/ClientOnly';
-import ProductModals from '../Components/ProductModals';
-import StockModals from '../Components/StockModals';
+import ProductModals, { type Product as ProductModalProduct } from '../Components/ProductModals';
+import StockModals, { type Product as StockModalProduct } from '../Components/StockModals';
 import ReceiptModal from '../Components/ReceiptModal';
 import CommonHeader from '../Components/CommonHeader';
 import { 
-    FaTachometerAlt, FaChartBar, FaBoxOpen, FaShoppingCart, FaExclamationTriangle, 
-    FaArrowUp, FaArrowDown, FaTag, FaCalendarAlt, FaSyncAlt, FaHome, FaPlus, FaEdit,
-    FaTrash, FaPrint, FaSearch, FaDownload, FaFilter, FaTimes, FaBars, FaEye,
-    FaCheckCircle, FaFileExport, FaReceipt, FaUndo
+    FaChartBar, FaShoppingCart,
+    FaArrowUp, FaArrowDown, FaTag, FaCalendarAlt, FaSyncAlt, FaPlus, FaEdit,
+    FaTrash, FaPrint, FaSearch, FaDownload, FaFilter, FaTimes,
+    FaCheckCircle, FaReceipt, FaUndo
 } from 'react-icons/fa';
 import Reports from '../Components/Reports';
 import InventoryAlerts from '../Components/InventoryAlerts';
@@ -29,6 +29,7 @@ interface CartItem {
     qty: number;
     price: number;
     unit: string;
+    lineTotal?: number;
 }
 
 interface SalesData {
@@ -39,10 +40,12 @@ interface SalesData {
     discount: number;
     items: Array<{
         product_id: string;
-        name: string;
-        quantity: number;
-        price: number;
-        unit: string;
+        name?: string;
+        quantity?: number;
+        qty?: number;
+        price?: number;
+        line_total?: number;
+        unit?: string;
     }>;
 }
 
@@ -99,7 +102,6 @@ interface CategoryFormState {
 }
 
 const Dashboard: React.FC = () => {
-    const router = useRouter();
     const [salesData, setSalesData] = useState<SalesData[]>([]);
     const [productData, setProductData] = useState<ProductData[]>([]);
     const [filteredProducts, setFilteredProducts] = useState<ProductData[]>([]);
@@ -141,20 +143,20 @@ const Dashboard: React.FC = () => {
     const isClient = typeof window !== 'undefined';
 
     const [selectedSale, setSelectedSale] = useState<SalesData | null>(null);
-    const [showSaleDetails, setShowSaleDetails] = useState<boolean>(false);
+    // const [showSaleDetails, setShowSaleDetails] = useState<boolean>(false); // unused
 
     // States for ProductModals
     const [showAddProductModal, setShowAddProductModal] = useState<boolean>(false);
     const [showListProductModal, setShowListProductModal] = useState<boolean>(false);
-    const [showEditModal, setShowEditModal] = useState<boolean>(false);
+    // const [showEditModal, setShowEditModal] = useState<boolean>(false); // unused
     const [selectedProduct, setSelectedProduct] = useState<ProductData | null>(null);
     const [deleteConfirmVisible, setDeleteConfirmVisible] = useState<boolean>(false);
-    const [editingProduct, setEditingProduct] = useState<ProductData | undefined>(undefined);
+    const [editingProduct, setEditingProduct] = useState<ProductModalProduct | undefined>(undefined);
 
     // States for StockModals
     const [showStockModal, setShowStockModal] = useState<boolean>(false);
     const [showAddStockModal, setShowAddStockModal] = useState<boolean>(false);
-    const [stockProduct, setStockProduct] = useState<ProductData | undefined>(undefined);
+    const [stockProduct, setStockProduct] = useState<StockModalProduct | undefined>(undefined);
 
     // State for Receipt view
     const [viewReceipt, setViewReceipt] = useState<boolean>(false);
@@ -197,9 +199,9 @@ const Dashboard: React.FC = () => {
     }, [salesData, salesSearchTerm]);
 
     // Navigation functions
-    const navigateToHome = () => {
-        router.push('/');
-    };
+    // const navigateToHome = () => { // unused
+    //     router.push('/');
+    // };
 
     // Print handling function
     const handlePrint = () => {
@@ -216,7 +218,54 @@ const Dashboard: React.FC = () => {
     const getReturnItemKey = (saleId: string, productId: string) => `${saleId}-${productId}`;
 
     const getProductForSaleItem = (saleItem: SalesData['items'][number]) => {
-        return productData.find(p => p.id.toString() === saleItem.product_id.toString());
+        return productData.find(p => p.id?.toString() === saleItem.product_id?.toString());
+    };
+
+    const getSaleItemQuantity = (saleItem: SalesData['items'][number]): number => {
+        const quantity = Number(saleItem.quantity ?? saleItem.qty ?? 0);
+        return Number.isFinite(quantity) ? quantity : 0;
+    };
+
+    const getSaleItemLineTotal = (saleItem: SalesData['items'][number]): number => {
+        const lineTotal = Number(saleItem.line_total ?? 0);
+        return Number.isFinite(lineTotal) ? lineTotal : 0;
+    };
+
+    const getSaleItemPrice = (saleItem: SalesData['items'][number]): number => {
+        const directPrice = Number(saleItem.price ?? 0);
+        if (Number.isFinite(directPrice) && directPrice > 0) {
+            return directPrice;
+        }
+
+        const quantity = getSaleItemQuantity(saleItem);
+        const lineTotal = getSaleItemLineTotal(saleItem);
+        if (quantity > 0 && Number.isFinite(lineTotal) && lineTotal > 0) {
+            return lineTotal / quantity;
+        }
+
+        return 0;
+    };
+
+    const getSaleItemName = (saleItem: SalesData['items'][number]): string => {
+        if (saleItem.name && saleItem.name.trim()) {
+            return saleItem.name;
+        }
+
+        const product = getProductForSaleItem(saleItem);
+        if (product?.name) {
+            return product.name;
+        }
+
+        return `Product #${saleItem.product_id}`;
+    };
+
+    const getSaleItemUnit = (saleItem: SalesData['items'][number]): string => {
+        if (saleItem.unit && saleItem.unit.trim()) {
+            return saleItem.unit;
+        }
+
+        const product = getProductForSaleItem(saleItem);
+        return product?.unit_config?.level_3_name || product?.unit_config?.level_1_name || 'Unit';
     };
 
     const getUnitConfig = (product?: ProductData) => {
@@ -295,7 +344,7 @@ const Dashboard: React.FC = () => {
             (field === 'stripQty' ? 0 : next.stripQty * factors.stripQty) +
             (field === 'tabletQty' ? 0 : next.tabletQty * factors.tabletQty);
 
-        const maxAllowedForField = Math.max(0, Math.floor((saleItem.quantity - totalOther) / factors[field]));
+        const maxAllowedForField = Math.max(0, Math.floor((getSaleItemQuantity(saleItem) - totalOther) / factors[field]));
         next[field] = Math.min(next[field], maxAllowedForField);
 
         setReturnQuantities((prevState) => ({
@@ -322,7 +371,7 @@ const Dashboard: React.FC = () => {
 
     const getReturnRefundAmount = (saleItem: SalesData['items'][number]) => {
         const qtyBase = getReturnQtyBase(saleItem);
-        return qtyBase * parseFloat(saleItem.price.toString());
+        return qtyBase * getSaleItemPrice(saleItem);
     };
 
     const totalRefundAmount = useMemo(() => {
@@ -334,10 +383,11 @@ const Dashboard: React.FC = () => {
     const convertSaleItemsToCartItems = (saleItems: any[]): CartItem[] => {
         return saleItems.map(item => ({
             id: item.product_id || '',
-            name: item.name || '',
-            qty: item.quantity || 0,
-            price: item.price || 0,
-            unit: item.unit || ''
+            name: getSaleItemName(item),
+            qty: getSaleItemQuantity(item),
+            price: getSaleItemPrice(item),
+            unit: getSaleItemUnit(item),
+            lineTotal: getSaleItemLineTotal(item)
         }));
     };
 
@@ -361,10 +411,10 @@ const Dashboard: React.FC = () => {
     };
 
     // Sale view and print functions
-    const handleViewSale = (sale: SalesData) => {
-        setSelectedSale(sale);
-        setShowSaleDetails(true);
-    };
+    // const handleViewSale = (sale: SalesData) => { // unused
+    //     setSelectedSale(sale);
+    //     setShowSaleDetails(true);
+    // };
 
     // Update this function in the Dashboard component
     const handlePrintReceipt = (sale: SalesData) => {
@@ -559,10 +609,10 @@ const Dashboard: React.FC = () => {
                             <tbody>
                                 ${sale.items.map((item: SaleItem) => `
                                     <tr>
-                                        <td>${item.name}</td>
-                                        <td>${item.quantity} ${item.unit}</td>
-                                        <td>${storeSettings.currency} ${parseFloat(item.price.toString()).toFixed(2)}</td>
-                                        <td>${storeSettings.currency} ${(item.quantity * parseFloat(item.price.toString())).toFixed(2)}</td>
+                                        <td>${getSaleItemName(item as any)}</td>
+                                        <td>${getSaleItemQuantity(item as any)} ${getSaleItemUnit(item as any)}</td>
+                                        <td>${storeSettings.currency} ${getSaleItemPrice(item as any).toFixed(2)}</td>
+                                        <td>${storeSettings.currency} ${(getSaleItemLineTotal(item as any) || (getSaleItemQuantity(item as any) * getSaleItemPrice(item as any))).toFixed(2)}</td>
                                     </tr>
                                 `).join('')}
                             </tbody>
@@ -615,15 +665,42 @@ const Dashboard: React.FC = () => {
         }
     };
 
+    const toProductModalProduct = (product: ProductData): ProductModalProduct => ({
+        id: Number(product.id),
+        name: product.name,
+        description: product.description,
+        category_name: product.category_name,
+        price_per_box: product.price_per_box,
+        price_per_strip: product.price_per_strip,
+        price_per_tablet: product.price_per_tablet,
+        base_stock: product.base_stock,
+        stock: product.base_stock,
+        unit_config: product.unit_config,
+        expiry_date: product.expiry_date
+    });
+
+    const toStockModalProduct = (product: ProductData): StockModalProduct => ({
+        id: String(product.id),
+        name: product.name,
+        description: product.description,
+        category_name: product.category_name,
+        price_per_box: product.price_per_box,
+        price_per_strip: product.price_per_strip,
+        price_per_tablet: product.price_per_tablet,
+        base_stock: product.base_stock,
+        stock: product.base_stock,
+        unit_config: product.unit_config
+    });
+
     // Add this function with your other handler functions
     const handleAddStock = (product: ProductData) => {
-        setStockProduct(product);
+        setStockProduct(toStockModalProduct(product));
         setShowAddStockModal(true);
     };
 
     // Product handling functions for inventory tab
     const handleEditProduct = (product: ProductData) => {
-        setEditingProduct(product);
+        setEditingProduct(toProductModalProduct(product));
         // Don't show the list modal, just the edit modal
         setShowListProductModal(false); 
         setShowAddProductModal(true); // Use this to trigger the ProductModals component
@@ -952,7 +1029,7 @@ const Dashboard: React.FC = () => {
                 chart: {
                     id: 'sales-chart',
                     type: 'line' as const,
-                    height: 350,
+                    height: 170,
                     toolbar: {
                         show: false
                     }
@@ -979,7 +1056,7 @@ const Dashboard: React.FC = () => {
                 },
                 title: {
                     text: 'Sales Trend',
-                    align: 'left' as 'left',
+                    align: 'left' as const,
                     style: {
                         fontSize: '16px',
                         fontWeight: 'bold',
@@ -1019,14 +1096,14 @@ const Dashboard: React.FC = () => {
             options: {
                 chart: {
                     type: 'pie' as const,
-                    height: 350
+                    height: 170
                 },
                 labels: categories,
                 responsive: [{
                     breakpoint: 480,
                     options: {
                         chart: {
-                            height: 300
+                            height: 140
                         },
                         legend: {
                             position: 'bottom'
@@ -1049,12 +1126,19 @@ const Dashboard: React.FC = () => {
         
         salesData.forEach(sale => {
             sale.items.forEach(item => {
-                const productId = item.product_id;
+                const productId = item.product_id?.toString();
+
+                if (!productId) return;
+
                 if (!productCounts[productId]) {
                     productCounts[productId] = { count: 0, revenue: 0 };
                 }
-                productCounts[productId].count += item.quantity;
-                productCounts[productId].revenue += item.quantity * parseFloat(item.price.toString());
+
+                const quantity = getSaleItemQuantity(item);
+                const price = getSaleItemPrice(item);
+
+                productCounts[productId].count += Number.isFinite(quantity) ? quantity : 0;
+                productCounts[productId].revenue += (Number.isFinite(quantity) ? quantity : 0) * (Number.isFinite(price) ? price : 0);
             });
         });
         
@@ -1062,13 +1146,13 @@ const Dashboard: React.FC = () => {
         const sortedProducts = Object.entries(productCounts)
             .map(([productId, data]) => {
                 // Look up the product in the productData array instead of salesData
-                const product = productData.find(p => p.id.toString() === productId);
+                const product = productData.find(p => p.id?.toString() === productId);
                 
                 return {
                     id: productId,
                     name: product ? product.name : 'Unknown Product',
-                    count: data.count,
-                    revenue: data.revenue
+                    count: data.count ?? 0,
+                    revenue: data.revenue ?? 0
                 };
             })
             .sort((a, b) => b.count - a.count)
@@ -1370,29 +1454,29 @@ const Dashboard: React.FC = () => {
                                         </div>
 
                                         {/* Charts Row */}
-                                        <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+                                        <div className="grid grid-cols-1 lg:grid-cols-2 gap-2">
                                             {/* Sales Chart */}
-                                            <div className="bg-white p-3 rounded-lg shadow-sm">
-                                                <h3 className="text-base font-semibold text-gray-700 mb-2">Sales Trend</h3>
+                                            <div className="bg-white p-2.5 rounded-lg shadow-sm overflow-hidden">
+                                                <h3 className="text-sm font-semibold text-gray-700 mb-1.5">Sales Trend</h3>
                                                 {isClient && (
                                                     <Chart
                                                         options={salesChartData.options}
                                                         series={salesChartData.series}
                                                         type="line"
-                                                        height={350}
+                                                        height={170}
                                                     />
                                                 )}
                                             </div>
 
                                             {/* Category Distribution Chart */}
-                                                <div className="bg-white p-3 rounded-lg shadow-sm">
-                                                    <h3 className="text-base font-semibold text-gray-700 mb-2">Product Categories</h3>
+                                                <div className="bg-white p-2.5 rounded-lg shadow-sm overflow-hidden">
+                                                    <h3 className="text-sm font-semibold text-gray-700 mb-1.5">Product Categories</h3>
                                                 {isClient && (
                                                     <Chart
                                                         options={categoryChartData.options}
                                                         series={categoryChartData.series}
                                                         type="pie"
-                                                        height={350}
+                                                        height={170}
                                                     />
                                                 )}
                                             </div>
@@ -1763,7 +1847,7 @@ const Dashboard: React.FC = () => {
                                                                 )}
                                                             </td>
                                                             <td className="px-4 py-2 text-gray-700">
-                                                                {category.created_at ? new Date(category.created_at).toLocaleDateString() : '-'}
+                                                                {category.created_at ? new Date(category.created_at).toLocaleDateString() : "&ndash;"}
                                                             </td>
                                                         </tr>
                                                     ))}
@@ -2107,8 +2191,8 @@ const Dashboard: React.FC = () => {
                         showListModal={showListProductModal}
                         setShowAddModal={setShowAddProductModal}
                         setShowListModal={setShowListProductModal}
-                        productToEdit={editingProduct}
-                        editModeOnly={!!editingProduct} // Add this line - if editingProduct exists, use edit mode only
+                        productToEdit={editingProduct as any}
+                        editModeOnly={!!editingProduct}
                     />
                 )}
 
@@ -2119,7 +2203,7 @@ const Dashboard: React.FC = () => {
                         showAddStockModal={showAddStockModal}
                         setShowStockModal={setShowStockModal}
                         setShowAddStockModal={setShowAddStockModal}
-                        productToStock={stockProduct ? {...stockProduct, id: stockProduct.id.toString()} : undefined}
+                        productToStock={stockProduct as any}
                     />
                 )}
 
@@ -2180,7 +2264,7 @@ const Dashboard: React.FC = () => {
                                             return (
                                                 <tr key={key} className="border-b">
                                                     <td className="px-4 py-2 text-gray-700">{saleItem.name}</td>
-                                                    <td className="px-4 py-2 text-gray-700">{formatBaseQty(saleItem.quantity, saleItem)}</td>
+                                                    <td className="px-4 py-2 text-gray-700">{formatBaseQty(getSaleItemQuantity(saleItem), saleItem)}</td>
                                                     <td className="px-4 py-2">
                                                         <input
                                                             type="number"

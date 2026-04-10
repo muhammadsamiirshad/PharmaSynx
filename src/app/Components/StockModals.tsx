@@ -1,16 +1,22 @@
 "use client";
 
 import React, { useState, useEffect, useRef } from 'react';
-import { FaTimes, FaSearch, FaEdit } from 'react-icons/fa';
+import { FaTimes, FaSearch } from 'react-icons/fa';
 
 export interface Product {
   id: string;
   name: string;
-  description: string;
-  category: string;
-  price: number;
-  stock: number;
-  unit: string;
+  description?: string;
+  category?: string;
+  category_name?: string;
+  price?: number;
+  stock?: number;
+  base_stock?: number;
+  unit?: string;
+  price_per_box?: number;
+  price_per_strip?: number;
+  price_per_tablet?: number;
+  unit_config?: any;
   photo?: string;
 }
 
@@ -165,7 +171,7 @@ const StockModals: React.FC<StockModalsProps> = ({
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({ 
-          stock: selectedProduct.stock + amount,  // Add to existing stock
+          stock: (selectedProduct.stock ?? 0) + amount,  // Add to existing stock
           action: 'add'  // Specify this is an addition
         })
       });
@@ -189,7 +195,7 @@ const StockModals: React.FC<StockModalsProps> = ({
 
   const filteredProducts = products.filter(product =>
     product.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    product.category.toLowerCase().includes(searchTerm.toLowerCase())
+    (product.category ?? '').toLowerCase().includes(searchTerm.toLowerCase())
   );
 
   return (

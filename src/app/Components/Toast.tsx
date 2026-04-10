@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect } from 'react';
+import React, { useEffect } from 'react';
 import { FaCheckCircle, FaTimesCircle, FaExclamationCircle, FaTimes } from 'react-icons/fa';
 
 type ToastType = 'success' | 'error' | 'info';

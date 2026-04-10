@@ -49,7 +49,7 @@ const CategoryModals: React.FC<CategoryModalsProps> = ({
         let data;
         try {
           data = JSON.parse(text);
-        } catch (e) {
+        } catch {
           console.error('Server response:', text);
           throw new Error('Invalid JSON response from server');
         }
@@ -123,8 +123,7 @@ const CategoryModals: React.FC<CategoryModalsProps> = ({
         let data;
         try {
             data = JSON.parse(text);
-        } catch (e) {
-            throw new Error(`Invalid response: ${text}`);
+        } catch {
         }
 
         if (!response.ok) {

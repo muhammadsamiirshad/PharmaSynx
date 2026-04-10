@@ -1,13 +1,9 @@
 "use client";
 
-import React, { useState, useEffect, useRef, useCallback } from "react";
-import { FaMinusCircle, FaPlusCircle, FaImage, FaTimes, FaSearch } from "react-icons/fa";
-import dynamic from 'next/dynamic';
-import { createPortal } from 'react-dom';
-import { useRouter } from 'next/navigation';
-import ReceiptModal from "../Components/ReceiptModal";
+import React, {  useState, useEffect, useCallback, useRef } from "react";
+import { FaMinusCircle, FaPlusCircle, FaImage, FaTimes } from "react-icons/fa";
+import ReceiptModal from '../Components/ReceiptModal';
 import KeyboardShortcuts from '../Components/KeyboardShortcuts';
-import Toast from "../Components/Toast";
 
 // Define interfaces
 interface Product {
@@ -15,26 +11,20 @@ interface Product {
     name: string;
     generic_name?: string;
     description?: string;
-    category: string;
-    price: number;
-    stock: number;
+    category?: string;
+    category_name?: string;
+    price?: number;
+    stock?: number;
     strips_per_box?: number;
     tabs_per_strip?: number;
     price_per_box?: number;
     price_per_strip?: number;
     price_per_tablet?: number;
-    base_stock: number;
-    unit: string;
-    unit_config?: {
-        unit_levels?: number;
-        level_1_name?: string | null;
-        level_2_name?: string | null;
-        level_3_name?: string | null;
-        conversion_1_to_2?: number | null;
-        conversion_2_to_3?: number | null;
-    };
-    defaultQty: number;
-    photo: string | null;
+    base_stock?: number;
+    unit?: string;
+    unit_config?: any;
+    defaultQty?: number;
+    photo?: string | null;
     expiry_date?: string;
 }
 
@@ -140,7 +130,7 @@ const useKeyboardNavigation = (
 };
 
 interface CartItem {
-    id: string;
+    id: string | number;
     name: string;
     qty: number;
     price: number;
@@ -156,6 +146,12 @@ interface QuantityModalState {
     productName: string;
     availableBaseStock: number;
     baseUnitName: string;
+}
+
+interface PaymentModalState {
+    isOpen: boolean;
+    amountReceived: string;
+    error: string;
 }
 
 interface ApiResponse {
@@ -189,6 +185,11 @@ const POS: React.FC = () => {
         availableBaseStock: 0,
         baseUnitName: ''
     });
+    const [paymentModal, setPaymentModal] = useState<PaymentModalState>({
+        isOpen: false,
+        amountReceived: '',
+        error: ''
+    });
     const [level1Qty, setLevel1Qty] = useState<number>(0);
     const [level2Qty, setLevel2Qty] = useState<number>(0);
     const [level3Qty, setLevel3Qty] = useState<number>(0);
@@ -199,6 +200,8 @@ const POS: React.FC = () => {
     const discountInputRef = useRef<HTMLInputElement>(null);
     const productContainerRef = useRef<HTMLDivElement>({} as HTMLDivElement);
     const [orderId, setOrderId] = useState<string>("");
+    const [paidAmount, setPaidAmount] = useState(0);
+    const [changeAmount, setChangeAmount] = useState(0);
 
     const getBaseStock = useCallback((product: Product) => {
         return product.base_stock ?? product.stock ?? 0;
@@ -295,7 +298,8 @@ const POS: React.FC = () => {
 
     // Define calculation functions first before they're used by other functions
     const calculateSubtotal = useCallback(() => {
-        return (items.reduce((total, item) => total + (item.lineTotal ?? 0), 0) ?? 0).toFixed(2);
+        const subtotal = items.reduce((total, item) => total + (item.lineTotal ?? 0), 0);
+        return (subtotal ?? 0).toFixed(2);
     }, [items]);
 
     const calculateDiscountAmount = useCallback(() => {
@@ -312,7 +316,8 @@ const POS: React.FC = () => {
     const calculateTotal = useCallback(() => {
         const subtotal = parseFloat(calculateSubtotal());
         const finalDiscount = calculateDiscountAmount();
-        return Math.max(0, ((subtotal ?? 0) - (finalDiscount ?? 0))).toFixed(2);
+        const total = Math.max(0, ((subtotal ?? 0) - (finalDiscount ?? 0)));
+        return (total ?? 0).toFixed(2);
     }, [calculateSubtotal, calculateDiscountAmount]);
 
     // Define modal handling functions before they're used
@@ -321,6 +326,28 @@ const POS: React.FC = () => {
         // Clear cart only after closing the receipt
         setItems([]);
         setDiscount(0);
+    }, []);
+
+    const openPaymentModal = useCallback(() => {
+        if (items.length === 0) {
+            setError('Cart is empty');
+            return;
+        }
+
+        setError(null);
+        setPaymentModal({
+            isOpen: true,
+            amountReceived: '',
+            error: ''
+        });
+    }, [items.length]);
+
+    const closePaymentModal = useCallback(() => {
+        setPaymentModal({
+            isOpen: false,
+            amountReceived: '',
+            error: ''
+        });
     }, []);
 
     const handlePrint = useCallback(() => {
@@ -407,9 +434,10 @@ const POS: React.FC = () => {
     }, [calculateSubtotal, discountType]);
 
     // Handlers for item management
-    const updateQty = useCallback(async (id: string, newQty: number) => {
-        const product = products.find(p => p.id === id);
-        const cartItem = items.find(item => item.id === id);
+    const updateQty = useCallback(async (id: string | number, newQty: number) => {
+        const idStr = String(id);
+        const product = products.find(p => String(p.id) === idStr);
+        const cartItem = items.find(item => String(item.id) === idStr);
         if (!product || !cartItem) return;
 
         const currentBaseStock = getBaseStock(product);
@@ -423,7 +451,7 @@ const POS: React.FC = () => {
 
         try {
             // Update backend stock first
-            const response = await fetch(`http://localhost:5000/api/products/${id}/stock`, {
+            const response = await fetch(`http://localhost:5000/api/products/${idStr}/stock`, {
                 method: 'PUT',
                 headers: {
                     'Content-Type': 'application/json',
@@ -468,18 +496,19 @@ const POS: React.FC = () => {
         }
     }, [products, items, getBaseStock]);
 
-    const removeItem = useCallback(async (id: string) => {
-        const item = items.find(i => i.id === id);
+    const removeItem = useCallback(async (id: string | number) => {
+        const idStr = String(id);
+        const item = items.find(i => String(i.id) === idStr);
         if (item) {
             try {
                 // Update stock in database
-                const response = await fetch(`http://localhost:5000/api/products/${id}/stock`, {
+                const response = await fetch(`http://localhost:5000/api/products/${idStr}/stock`, {
                     method: 'PUT',
                     headers: {
                         'Content-Type': 'application/json',
                     },
                     body: JSON.stringify({
-                        base_stock: (products.find(p => p.id === id)?.base_stock ?? products.find(p => p.id === id)?.stock ?? 0) + item.qty
+                        base_stock: (products.find(p => String(p.id) === idStr)?.base_stock ?? products.find(p => String(p.id) === idStr)?.stock ?? 0) + item.qty
                     }),
                 });
 
@@ -490,7 +519,7 @@ const POS: React.FC = () => {
                 // Update local state
                 setProducts(prevProducts =>
                     prevProducts.map(p =>
-                        p.id === id
+                        String(p.id) === idStr
                             ? {
                                 ...p,
                                 base_stock: (p.base_stock ?? p.stock ?? 0) + item.qty,
@@ -499,7 +528,7 @@ const POS: React.FC = () => {
                             : p
                     )
                 );
-                setItems(prevItems => prevItems.filter(i => i.id !== id));
+                setItems(prevItems => prevItems.filter(i => String(i.id) !== idStr));
             } catch (error) {
                 console.error('Error removing item:', error);
             }
@@ -507,14 +536,28 @@ const POS: React.FC = () => {
     }, [products, items]);
 
     // Major functionality handlers
-    const handlePayment = useCallback(async () => {
+    const handlePayment = useCallback(async (amountReceived: number) => {
         if (items.length === 0) {
             setError("Cart is empty");
             return;
         }
 
+        const totalAmount = Number.parseFloat(calculateTotal()) || 0;
+        const receivedAmount = Number.isFinite(amountReceived) ? Number.parseFloat(amountReceived.toFixed(2)) : 0;
+
+        if (receivedAmount < totalAmount) {
+            setPaymentModal(prev => ({
+                ...prev,
+                error: 'Amount received must be at least the bill total.'
+            }));
+            return;
+        }
+
+        const change = Number.parseFloat((receivedAmount - totalAmount).toFixed(2));
+
         // Prepare sale data
-        const discountAmount = parseFloat((calculateDiscountAmount() ?? 0).toFixed(2));
+        const discountAmountValue = calculateDiscountAmount();
+        const discountAmount = parseFloat((discountAmountValue ?? 0).toFixed(2));
         const saleData = {
             items: items.map(item => ({
                 product_id: item.id,
@@ -523,11 +566,14 @@ const POS: React.FC = () => {
             })),
             total: parseFloat(calculateTotal()),
             subtotal: parseFloat(calculateSubtotal()),
-            discount: discountAmount
+            discount: discountAmount,
+            amount_received: receivedAmount,
+            change_return: change
         };
 
         try {
             setError(null);
+            setPaymentModal(prev => ({ ...prev, error: '' }));
             // Save sale to server
             const response = await fetch('http://localhost:5000/api/sales', {
                 method: 'POST',
@@ -545,10 +591,12 @@ const POS: React.FC = () => {
             const saleId = result.id;
 
             setOrderId(saleId.toString()); // Store the exact database ID
+            setPaidAmount(receivedAmount);
+            setChangeAmount(change);
 
             // Update products stock - NOW we actually update the database
             for (const item of items) {
-                const productIndex = products.findIndex(p => p.id === item.id);
+                const productIndex = products.findIndex(p => String(p.id) === String(item.id));
                 if (productIndex !== -1) {
                     const updatedBaseStock = Math.max(0, products[productIndex].base_stock ?? products[productIndex].stock ?? 0);
                     
@@ -565,13 +613,14 @@ const POS: React.FC = () => {
             }
 
             // Show the receipt with the correct order number
+            closePaymentModal();
             setShowReceipt(true);
 
         } catch (err) {
             console.error(err);
             setError('Failed to process payment. Please try again.');
         }
-    }, [items, calculateTotal, calculateSubtotal, calculateDiscountAmount, products]);
+    }, [items, calculateTotal, calculateSubtotal, calculateDiscountAmount, products, closePaymentModal]);
 
     const finalizeSale = useCallback(async () => {
         try {
@@ -590,7 +639,7 @@ const POS: React.FC = () => {
         try {
           // Reset stock for each item in cart back to the original amounts
           for (const item of items) {
-            const product = products.find(p => p.id === item.id);
+            const product = products.find(p => String(p.id) === String(item.id));
             if (product) {
               // Reset stock in the UI immediately
               setProducts(prevProducts => 
@@ -651,11 +700,11 @@ const POS: React.FC = () => {
         setShowHeldBillsModal(false);
     }, [heldBills, items.length]);
 
-    const addToCartById = useCallback((id: string) => {
-        const product = products.find(p => p.id === id);
+    const addToCartById = useCallback((id: string | number) => {
+        const product = products.find(p => String(p.id) === String(id));
 
         if (!product) {
-            console.error('Product not found');
+            console.error('Product not found', id, products);
             return;
         }
 
@@ -668,7 +717,7 @@ const POS: React.FC = () => {
 
         setQuantityModal({
             isOpen: true,
-            productId: id,
+            productId: String(product.id),
             productName: product.name,
             availableBaseStock,
             baseUnitName: getUnitConfig(product).level3Name
@@ -681,7 +730,7 @@ const POS: React.FC = () => {
     const handleQuantitySubmit = useCallback(() => {
         if (!quantityModal.productId) return;
         
-        const product = products.find(p => p.id === quantityModal.productId);
+        const product = products.find(p => String(p.id) === quantityModal.productId);
         if (!product) return;
 
             const totalBaseQuantity = calculateSelectedBaseQty(product, level1Qty, level2Qty, level3Qty);
@@ -691,12 +740,12 @@ const POS: React.FC = () => {
                     return;
                 }
         
-        const existingItem = items.find(item => item.id === quantityModal.productId);
+        const existingItem = items.find(item => String(item.id) === quantityModal.productId);
         
         if (existingItem) {
                     setItems(prevItems =>
                         prevItems.map(item =>
-                            item.id === quantityModal.productId
+                            String(item.id) === quantityModal.productId
                                 ? {
                                         ...item,
                                         qty: item.qty + totalBaseQuantity,
@@ -716,10 +765,10 @@ const POS: React.FC = () => {
               qty: totalBaseQuantity,
               price: 0,
               lineTotal,
-              unit: product.unit,
+                            unit: product.unit ?? 'Unit',
               product
             }
-          ]);
+                    ]);
         }
 
                 // Update product stock in state (frontend only until checkout)
@@ -751,7 +800,7 @@ const POS: React.FC = () => {
 
         switch (filter) {
             case "Category":
-                return matchesSearch && product.category.toLowerCase().includes(query);
+                return matchesSearch && (product.category || '').toLowerCase().includes(query);
             case "Stock":
                 return matchesSearch && getBaseStock(product) > 0;
             default:
@@ -874,6 +923,14 @@ const POS: React.FC = () => {
     // Split keyboard handlers into two effects to avoid circular dependencies
     useEffect(() => {
         const handleBasicKeyboard = (e: KeyboardEvent) => {
+            if (paymentModal.isOpen) {
+                if (e.key === 'Escape') {
+                    e.preventDefault();
+                    closePaymentModal();
+                }
+                return;
+            }
+
             // Always handle F8 and Escape regardless of focus
             if (e.key === 'F8' || e.key === 'Escape') {
                 e.preventDefault();
@@ -905,11 +962,15 @@ const POS: React.FC = () => {
 
         window.addEventListener('keydown', handleBasicKeyboard);
         return () => window.removeEventListener('keydown', handleBasicKeyboard);
-    }, [quantityModal.isOpen, showReceipt, handleModalClose, setSelectedIndex]);
+    }, [paymentModal.isOpen, quantityModal.isOpen, showReceipt, handleModalClose, closePaymentModal, setSelectedIndex]);
 
     // Separate effect for handlers that depend on other functions
     useEffect(() => {
         const handleActionKeyboard = (e: KeyboardEvent) => {
+            if (paymentModal.isOpen) {
+                return;
+            }
+
             const target = e.target as HTMLElement;
             const isInputField = target.tagName === 'INPUT' || target.tagName === 'TEXTAREA';
 
@@ -923,7 +984,7 @@ const POS: React.FC = () => {
                 // Remove the isInputField condition for Shift key
                 e.preventDefault();
                 if (items.length > 0) {
-                    handlePayment();
+                    openPaymentModal();
                 }
             } else if (e.key === 'F2') {
                 e.preventDefault();
@@ -937,7 +998,7 @@ const POS: React.FC = () => {
                         e.preventDefault();
                         if (items.length > 0) {
                             const lastItem = items[items.length - 1];
-                            const product = products.find(p => p.id === lastItem.id);
+                            const product = products.find(p => String(p.id) === String(lastItem.id));
                             if (product && lastItem.qty < getBaseStock(product) + lastItem.qty) {
                                 updateQty(lastItem.id, lastItem.qty + 1);
                             }
@@ -958,7 +1019,7 @@ const POS: React.FC = () => {
 
         window.addEventListener('keydown', handleActionKeyboard);
         return () => window.removeEventListener('keydown', handleActionKeyboard);
-    }, [items, products, handleCancel, handlePayment, updateQty]);
+    }, [items, products, handleCancel, openPaymentModal, updateQty, paymentModal.isOpen]);
 
     useEffect(() => {
         const handleAltShortcuts = (e: KeyboardEvent) => {
@@ -983,14 +1044,19 @@ const POS: React.FC = () => {
                 if (showReceipt) {
                     handlePrint();
                 } else if (items.length > 0) {
-                    handlePayment();
+                    openPaymentModal();
                 }
             }
         };
 
         window.addEventListener('keydown', handleAltShortcuts);
         return () => window.removeEventListener('keydown', handleAltShortcuts);
-    }, [items.length, showReceipt, handlePayment, handlePrint]);
+    }, [items.length, showReceipt, openPaymentModal, handlePrint]);
+
+    const paymentTotal = Number.parseFloat(calculateTotal()) || 0;
+    const paymentEnteredAmount = Number.parseFloat(paymentModal.amountReceived);
+    const paymentChange = Number.isFinite(paymentEnteredAmount) ? Math.max(0, paymentEnteredAmount - paymentTotal) : 0;
+    const isPaymentAmountValid = Number.isFinite(paymentEnteredAmount) && paymentEnteredAmount >= paymentTotal;
 
     return (
         <div className="w-full max-w-full px-2 overflow-hidden h-full">
@@ -1030,7 +1096,7 @@ const POS: React.FC = () => {
                                     </tr>
                                 ) : (
                                     items.map((item, index) => {
-                                        const product = products.find(p => p.id === item.id);
+                                        const product = products.find(p => String(p.id) === String(item.id));
                                         return (
                                             <tr key={item.id} className="border-b border-gray-200 hover:bg-gray-50">
                                                 <td className="py-1 px-2 text-center text-gray-700">{index + 1}</td>
@@ -1210,12 +1276,13 @@ const POS: React.FC = () => {
                                 </button>
 
                                 <button
-                                    onClick={handlePayment}
+                                    onClick={openPaymentModal}
                                     disabled={items.length === 0}
                                     className={`bg-green-500 text-white px-8 py-2 rounded-lg ${items.length === 0 ? 'opacity-50 cursor-not-allowed' : 'hover:bg-green-600'}`}
                                     onKeyDown={(e) => {
-                                        if (e.key === 'Shift' && items.length > 0) {
-                                            handlePayment();
+                                        if (e.key === 'Enter' && items.length > 0) {
+                                            e.preventDefault();
+                                            openPaymentModal();
                                         }
                                     }}
                                     tabIndex={0}
@@ -1288,13 +1355,13 @@ const POS: React.FC = () => {
                                     <div
                                         key={product.id}
                                         data-product-index={index}
-                                        onClick={() => getBaseStock(product) > 0 ? addToCartById(product.id) : null}
+                                        onClick={() => getBaseStock(product) > 0 ? addToCartById(String(product.id)) : null}
                                         onKeyDown={(e) => {
                                             switch (e.key) {
                                                 case 'Enter':
                                                 case ' ':
                                                     e.preventDefault();
-                                                    if (getBaseStock(product) > 0) addToCartById(product.id);
+                                                    if (getBaseStock(product) > 0) addToCartById(String(product.id));
                                                     break;
                                                 case 'ArrowRight':
                                                 case 'ArrowLeft':
@@ -1361,11 +1428,90 @@ const POS: React.FC = () => {
             </div>
 
             {/* Modals */}
+            {paymentModal.isOpen && (
+                <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50">
+                    <div className="bg-white p-6 rounded-xl shadow-xl w-96">
+                        <h2 className="text-xl font-bold mb-2 text-gray-800">Collect Payment</h2>
+                        <p className="text-sm text-gray-600 mb-4">Enter the amount the customer gave.</p>
+
+                        <div className="mb-4 rounded-lg bg-teal-50 border border-teal-100 p-3">
+                            <div className="flex justify-between text-sm text-gray-700">
+                                <span>Bill Total</span>
+                                <span className="font-semibold">Rs. {paymentTotal.toFixed(2)}</span>
+                            </div>
+                            <div className="flex justify-between text-sm text-gray-700 mt-2">
+                                <span>Change</span>
+                                <span className="font-semibold text-teal-700">Rs. {paymentChange.toFixed(2)}</span>
+                            </div>
+                        </div>
+
+                        <label className="block text-sm font-medium text-gray-700 mb-1" htmlFor="amount-received">
+                            Amount received
+                        </label>
+                        <input
+                            id="amount-received"
+                            type="number"
+                            min="0"
+                            step="0.01"
+                            autoFocus
+                            value={paymentModal.amountReceived}
+                            onChange={(e) => {
+                                setPaymentModal(prev => ({
+                                    ...prev,
+                                    amountReceived: e.target.value,
+                                    error: ''
+                                }));
+                            }}
+                            onKeyDown={(e) => {
+                                if (e.key === 'Escape') {
+                                    e.preventDefault();
+                                    closePaymentModal();
+                                }
+
+                                if (e.key === 'Enter') {
+                                    e.preventDefault();
+                                    void handlePayment(Number.parseFloat(paymentModal.amountReceived));
+                                }
+                            }}
+                            className="w-full border border-gray-300 rounded-lg px-3 py-2 text-gray-800 focus:outline-none focus:ring-2 focus:ring-teal-500"
+                            placeholder="0.00"
+                        />
+
+                        <div className="mt-3 min-h-[1.25rem] text-sm">
+                            {!isPaymentAmountValid && paymentModal.amountReceived.trim() !== '' ? (
+                                <p className="text-red-600">Amount received must be at least the bill total.</p>
+                            ) : paymentModal.error ? (
+                                <p className="text-red-600">{paymentModal.error}</p>
+                            ) : (
+                                <p className="text-gray-500">Change updates as you type.</p>
+                            )}
+                        </div>
+
+                        <div className="flex justify-end space-x-3 mt-5">
+                            <button
+                                onClick={closePaymentModal}
+                                className="px-4 py-2 bg-gray-300 text-gray-700 rounded hover:bg-gray-400"
+                            >
+                                Cancel
+                            </button>
+                            <button
+                                onClick={() => void handlePayment(paymentEnteredAmount)}
+                                disabled={!isPaymentAmountValid}
+                                className={`px-4 py-2 rounded text-white ${isPaymentAmountValid ? 'bg-teal-500 hover:bg-teal-600' : 'bg-gray-400 cursor-not-allowed'}`}
+                            >
+                                Confirm Payment
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
             {showReceipt && (
                 <ReceiptModal
                     items={items.map((item) => ({
                         ...item,
-                        formattedQty: formatCartQuantity(item.product || products.find(p => p.id === item.id), item.qty)
+                        id: String(item.id),
+                        formattedQty: formatCartQuantity(item.product || products.find(p => String(p.id) === String(item.id)), item.qty)
                     }))}
                     discount={calculateDiscountAmount()}
                     calculateSubtotal={calculateSubtotal}
@@ -1373,6 +1519,8 @@ const POS: React.FC = () => {
                     handlePrint={handlePrint}
                     onClose={handleModalClose}
                     saveSale={finalizeSale}
+                    amountReceived={paidAmount}
+                    changeAmount={changeAmount}
                     orderNumber={orderId} // Pass the order ID directly, no formatting
                 />
             )}
@@ -1402,7 +1550,10 @@ const POS: React.FC = () => {
                                             <p className="font-semibold text-gray-800">Bill #{index + 1}</p>
                                             <p className="text-sm text-gray-600">Items: {bill.items.length}</p>
                                             <p className="text-sm text-gray-600">
-                                                Total: Rs. {(bill.items.reduce((sum, item) => sum + (item.lineTotal ?? 0), 0) ?? 0).toFixed(2)}
+                                                Total: Rs. {(() => {
+                                                    const billTotal = bill.items.reduce((sum, item) => sum + (item.lineTotal ?? 0), 0);
+                                                    return (billTotal ?? 0).toFixed(2);
+                                                })()}
                                             </p>
                                             <p className="text-xs text-gray-500">
                                                 Held at: {new Date(bill.createdAt).toLocaleTimeString()}
@@ -1432,7 +1583,7 @@ const POS: React.FC = () => {
 
                         <div className="space-y-3 mb-4">
                             {(() => {
-                                const product = products.find(p => p.id === quantityModal.productId);
+                                const product = products.find(p => String(p.id) === quantityModal.productId);
                                 if (!product) return null;
 
                                 const config = getUnitConfig(product);
@@ -1492,9 +1643,10 @@ const POS: React.FC = () => {
 
                             <div className="text-sm text-gray-700 font-semibold">
                                 Line Total: Rs. {(() => {
-                                    const product = products.find(p => p.id === quantityModal.productId);
+                                    const product = products.find(p => String(p.id) === quantityModal.productId);
                                     if (!product) return '0.00';
-                                    return (calculateSelectedLineTotal(product, level1Qty, level2Qty, level3Qty) ?? 0).toFixed(2);
+                                    const lineTotal = calculateSelectedLineTotal(product, level1Qty, level2Qty, level3Qty);
+                                    return (lineTotal ?? 0).toFixed(2);
                                 })()}
                             </div>
                         </div>

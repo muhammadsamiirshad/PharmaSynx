@@ -105,11 +105,26 @@ const ensureCategorySchemaColumns = async () => {
     `);
 };
 
+    const ensureSalesSchemaColumns = async () => {
+        const columns = await db.all(`PRAGMA table_info(sales)`);
+        const existing = new Set(columns.map((col) => col.name));
+        const migrations = [
+            { name: 'amount_received', sql: 'ALTER TABLE sales ADD COLUMN amount_received REAL DEFAULT 0' },
+            { name: 'change_return', sql: 'ALTER TABLE sales ADD COLUMN change_return REAL DEFAULT 0' }
+        ];
+
+        for (const migration of migrations) {
+            if (!existing.has(migration.name)) {
+                await db.exec(migration.sql);
+            }
+        }
+    };
+
 // Update the database initialization
 async function initializeDatabase() {
     try {
         db = await open({
-            filename: path.join(__dirname, 'pharmacy.db'),
+            filename: path.join(process.cwd(), 'pharmacy.db'),
             driver: sqlite3.Database
         });
 
@@ -143,6 +158,8 @@ async function initializeDatabase() {
                 total REAL NOT NULL,
                 subtotal REAL NOT NULL,
                 discount REAL DEFAULT 0,
+                amount_received REAL DEFAULT 0,
+                change_return REAL DEFAULT 0,
                 created_at TEXT DEFAULT CURRENT_TIMESTAMP
             );
 
@@ -167,6 +184,9 @@ async function initializeDatabase() {
                 FOREIGN KEY (product_id) REFERENCES products (id)
             );
         `);
+
+        await ensureCategorySchemaColumns();
+        await ensureSalesSchemaColumns();
 
         console.log('Database initialized successfully');
     } catch (err) {
@@ -391,20 +411,7 @@ initializeDatabase().then(() => {
     // Categories API
     app.get('/api/categories', async (req, res) => {
         try {
-            const categories = await db.all(`
-                SELECT
-                    id,
-                    name,
-                    unit_levels,
-                    level_1_name,
-                    level_2_name,
-                    level_3_name,
-                    conversion_1_to_2,
-                    conversion_2_to_3,
-                    created_at
-                FROM categories
-                ORDER BY name ASC
-            `);
+            const categories = await db.all(`SELECT * FROM categories ORDER BY name ASC`);
             res.json(categories);
         } catch (err) {
             res.status(500).json({ error: err.message });
@@ -534,7 +541,7 @@ initializeDatabase().then(() => {
 
     // Sales API
     app.post('/api/sales', async (req, res) => {
-        const { items, total, subtotal, discount } = req.body;
+        const { items, total, subtotal, discount, amount_received, change_return } = req.body;
         
         try {
             // Begin transaction
@@ -542,9 +549,9 @@ initializeDatabase().then(() => {
             
             // Insert sale
             const saleResult = await db.run(`
-                INSERT INTO sales (total, subtotal, discount, created_at)
-                VALUES (?, ?, ?, datetime('now', 'localtime'))
-            `, [total, subtotal, discount || 0]);
+                INSERT INTO sales (total, subtotal, discount, amount_received, change_return, created_at)
+                VALUES (?, ?, ?, ?, ?, datetime('now', 'localtime'))
+            `, [total, subtotal, discount || 0, amount_received || 0, change_return || 0]);
             
             const saleId = saleResult.lastID;
             
@@ -657,6 +664,8 @@ initializeDatabase().then(() => {
                     total,
                     subtotal,
                     discount,
+                    amount_received,
+                    change_return,
                     created_at,
                     created_at AS date
                 FROM sales

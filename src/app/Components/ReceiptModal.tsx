@@ -25,6 +25,8 @@ interface ReceiptModalProps {
     onClose: () => void;
     saveSale: () => Promise<boolean>;
     orderNumber?: string; // Order number prop - this will be the actual database ID
+    amountReceived?: number;
+    changeAmount?: number;
 }
 
 const printStyles = `
@@ -129,10 +131,12 @@ const ReceiptModal = ({
     discount,
     calculateSubtotal,
     calculateTotal,
-    handlePrint,
+    // handlePrint, // unused
     onClose,
     saveSale,
-    orderNumber
+    orderNumber,
+    amountReceived = 0,
+    changeAmount = 0
 }: ReceiptModalProps) => {
     const [mounted, setMounted] = useState(false);
     const [clientDate] = useState(() => new Date().toLocaleDateString());
@@ -358,6 +362,17 @@ const ReceiptModal = ({
                             <span>Total:</span>
                             <span>${storeSettings.currency} ${calculateTotal()}</span>
                         </div>
+                        ${amountReceived > 0 ? `
+                        <div class="total-line">
+                            <span>Amount Received:</span>
+                            <span>${storeSettings.currency} ${amountReceived.toFixed(2)}</span>
+                        </div>
+                        <div class="total-line">
+                            <span>Change:</span>
+                            <span>${storeSettings.currency} ${changeAmount.toFixed(2)}</span>
+                        </div>
+                        ` : ''}
+                    </div>
                     </div>
                     
                     <div class="divider"></div>
@@ -379,7 +394,7 @@ const ReceiptModal = ({
             printWin.document.close();
         }
         onClose();
-    }, [items, discount, calculateSubtotal, calculateTotal, orderNumber, clientDate, clientTime, onClose, storeSettings]);
+    }, [items, discount, calculateSubtotal, calculateTotal, orderNumber, amountReceived, changeAmount, clientDate, clientTime, onClose, storeSettings]);
 
     useEffect(() => {
         setMounted(true);
@@ -506,6 +521,18 @@ const ReceiptModal = ({
                             <p>Total:</p>
                             <p>{storeSettings.currency} {calculateTotal()}</p>
                         </div>
+                        {amountReceived > 0 && (
+                            <>
+                                <div className="flex justify-between">
+                                    <p className="font-medium">Amount Received:</p>
+                                    <p>{storeSettings.currency} {formatPrice(amountReceived)}</p>
+                                </div>
+                                <div className="flex justify-between">
+                                    <p className="font-medium">Change:</p>
+                                    <p>{storeSettings.currency} {formatPrice(changeAmount)}</p>
+                                </div>
+                            </>
+                        )}
                     </div>
 
                     <div className="receipt-divider border-t border-dashed border-gray-300"></div>

@@ -1,18 +1,17 @@
 "use client";
 
 import React, { useState, useEffect } from 'react';
-import { FaTimes, FaSearch, FaPlus, FaImage, FaEdit } from 'react-icons/fa';
-import { MdDeleteForever } from 'react-icons/md';
-import Category from '../Components/CategoryModals';
+import { FaTimes, FaImage } from 'react-icons/fa';
 import { createPortal } from 'react-dom';
 
 export interface Product {
-  id: number;  // Changed from string to number for SQLite
+  id: number;
   name: string;
-  description: string;
-  category: string;  // Changed from category_id
-  price: number;
-  stock: number;
+  description?: string;
+  category?: string;  // Changed from category_id
+  category_name?: string;
+  price?: number;
+  stock?: number;
   base_stock?: number;
   strips_per_box?: number;
   tabs_per_strip?: number;
@@ -24,11 +23,12 @@ export interface Product {
   price_per_level_3?: string;
   conversion_1_to_2?: string;
   conversion_2_to_3?: string;
-  opening_balance_base?: string;
-  unit: string;
-  defaultQty: number;
-  photo: string;
-  expiry_date: string; // Changed from expiryDate to match SQLite
+  add_stock_base?: string;
+  unit?: string;
+  defaultQty?: number;
+  photo?: string;
+  expiry_date?: string; // Changed from expiryDate to match SQLite
+  unit_config?: any;
 }
 
 interface CategoryConfig {
@@ -62,28 +62,28 @@ const ProductModals: React.FC<ProductModalsProps> = ({
 }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [filteredProducts, setFilteredProducts] = useState<Product[]>([]);
+  const [products, setProducts] = useState<Product[]>([]);
+  const [categories, setCategories] = useState<CategoryConfig[]>([]);
+  const [editingProduct, setEditingProduct] = useState<Product | null>(null);
   const [newProduct, setNewProduct] = useState({
     name: '',
     description: '',
-    category: '',  // Changed from category_id
+    category: '',
     price_per_level_1: '',
     price_per_level_2: '',
     price_per_level_3: '',
     conversion_1_to_2: '',
     conversion_2_to_3: '',
-    opening_balance_base: '',
+    add_stock_base: '',
     unit: '',
     defaultQty: 1,
     photo: '',
     expiry_date: '' // Changed from expiryDate
   });
   const [error, setError] = useState<string | null>(null);
-  const [products, setProducts] = useState<Product[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [editingProduct, setEditingProduct] = useState<Product | null>(null);
+    const [loading, setLoading] = useState(false); // Keep loading state for product fetching
   const [showEditModal, setShowEditModal] = useState(false);
   const [mounted, setMounted] = useState(false);
-  const [categories, setCategories] = useState<CategoryConfig[]>([]);
 
   // Define closeAllModals function here so it's available in all modes
   const closeAllModals = () => {
@@ -111,7 +111,7 @@ const ProductModals: React.FC<ProductModalsProps> = ({
         price_per_level_3: unitLevels === 3 ? String(p.price_per_tablet ?? '') : '',
         conversion_1_to_2: unitLevels >= 2 ? String((p.unit_config?.conversion_1_to_2 ?? p.strips_per_box ?? '')) : '',
         conversion_2_to_3: unitLevels === 3 ? String((p.unit_config?.conversion_2_to_3 ?? p.tabs_per_strip ?? '')) : '',
-        opening_balance_base: String(p.base_stock ?? p.stock ?? 0)
+        add_stock_base: String(p.base_stock ?? p.stock ?? 0)
       });
       setShowEditModal(true);
     }
@@ -170,6 +170,88 @@ const ProductModals: React.FC<ProductModalsProps> = ({
     };
   };
 
+  const parseMoney = (value: string | number | undefined): number => {
+    const parsed = Number.parseFloat(String(value ?? ''));
+    return Number.isFinite(parsed) ? parsed : 0;
+  };
+
+  const formatMoney = (value: number): string => {
+    const safe = Number.isFinite(value) ? Math.max(0, value) : 0;
+    return safe.toFixed(2);
+  };
+
+  const applyAutoPriceCalculation = <T extends {
+    category: string;
+    price_per_level_1: string;
+    price_per_level_2: string;
+    price_per_level_3: string;
+    conversion_1_to_2: string;
+    conversion_2_to_3: string;
+  }>(
+    source: T,
+    changedField: 'price_per_level_1' | 'price_per_level_2' | 'price_per_level_3' | 'conversion_1_to_2' | 'conversion_2_to_3',
+    changedValue: string
+  ): T => {
+    const next = { ...source, [changedField]: changedValue } as T;
+    const cfg = getEffectiveConfig(next.category || source.category || '');
+
+    const unitLevels = cfg.unitLevels;
+    const c1 = Math.max(1, Number.parseInt(next.conversion_1_to_2 || String(cfg.conversion1To2), 10) || 1);
+    const c2 = Math.max(1, Number.parseInt(next.conversion_2_to_3 || String(cfg.conversion2To3), 10) || 1);
+
+    let p1 = parseMoney(next.price_per_level_1);
+    let p2 = parseMoney(next.price_per_level_2);
+    let p3 = parseMoney(next.price_per_level_3);
+
+    if (unitLevels === 1) {
+      next.price_per_level_2 = '';
+      next.price_per_level_3 = '';
+      next.conversion_1_to_2 = '';
+      next.conversion_2_to_3 = '';
+      return next;
+    }
+
+    if (unitLevels === 2) {
+      if (changedField === 'price_per_level_1') {
+        p2 = c1 > 0 ? p1 / c1 : 0;
+      } else if (changedField === 'conversion_1_to_2') {
+        // Keep level 1 as source of truth when conversion changes.
+        if (p1 > 0) {
+          p2 = c1 > 0 ? p1 / c1 : 0;
+        }
+      }
+
+      next.price_per_level_1 = changedField === 'price_per_level_1' ? changedValue : next.price_per_level_1;
+      next.price_per_level_2 = changedField === 'price_per_level_2' ? changedValue : formatMoney(p2);
+      next.price_per_level_3 = '';
+      next.conversion_2_to_3 = '';
+      return next;
+    }
+
+    if (changedField === 'price_per_level_1') {
+      p2 = c1 > 0 ? p1 / c1 : 0;
+      p3 = c2 > 0 ? p2 / c2 : 0;
+    } else if (changedField === 'conversion_1_to_2') {
+      // Keep level 1 as source of truth when conversion changes.
+      if (p1 > 0) {
+        p2 = c1 > 0 ? p1 / c1 : 0;
+      }
+      p3 = c2 > 0 ? p2 / c2 : 0;
+    } else if (changedField === 'conversion_2_to_3') {
+      // Keep level 1 as source of truth when conversion changes.
+      if (p1 > 0) {
+        p2 = c1 > 0 ? p1 / c1 : 0;
+        p3 = c2 > 0 ? p2 / c2 : 0;
+      }
+    }
+
+    next.price_per_level_1 = changedField === 'price_per_level_1' ? changedValue : next.price_per_level_1;
+    next.price_per_level_2 = changedField === 'price_per_level_2' ? changedValue : formatMoney(p2);
+    next.price_per_level_3 = changedField === 'price_per_level_3' ? changedValue : formatMoney(p3);
+
+    return next;
+  };
+
   const buildProductPayloadFromDynamicFields = (source: any) => {
     const categoryConfig = getCategoryConfig(source.category || '');
     const categoryId = categoryConfig?.id || null;
@@ -179,7 +261,7 @@ const ProductModals: React.FC<ProductModalsProps> = ({
     const price1 = parseFloat(source.price_per_level_1 || '0') || 0;
     const price2 = unitLevels >= 2 ? (parseFloat(source.price_per_level_2 || '0') || 0) : 0;
     const price3 = unitLevels === 3 ? (parseFloat(source.price_per_level_3 || '0') || 0) : 0;
-    const baseStock = parseInt(source.opening_balance_base || '0', 10) || 0;
+    const baseStock = parseInt(source.add_stock_base || source.opening_balance_base || '0', 10) || 0;
 
     return {
       name: source.name,
@@ -188,7 +270,8 @@ const ProductModals: React.FC<ProductModalsProps> = ({
       price_per_box: price1,
       price_per_strip: unitLevels >= 2 ? price2 : null,
       price_per_tablet: unitLevels === 3 ? price3 : null,
-      base_stock: baseStock
+      base_stock: baseStock,
+      expiry_date: source.expiry_date || null
     };
   };
 
@@ -205,6 +288,13 @@ const ProductModals: React.FC<ProductModalsProps> = ({
     }));
   };
 
+  const handleNewFieldAutoCalculation = (
+    field: 'price_per_level_1' | 'price_per_level_2' | 'price_per_level_3' | 'conversion_1_to_2' | 'conversion_2_to_3',
+    value: string
+  ) => {
+    setNewProduct((prev) => applyAutoPriceCalculation(prev, field, value));
+  };
+
   const handleEditingCategoryChange = (categoryName: string) => {
     if (!editingProduct) return;
     const config = getEffectiveConfig(categoryName);
@@ -216,6 +306,17 @@ const ProductModals: React.FC<ProductModalsProps> = ({
       conversion_2_to_3: config.unitLevels === 3 ? String(config.conversion2To3) : '',
       price_per_level_2: config.unitLevels >= 2 ? (editingProduct.price_per_level_2 || '') : '',
       price_per_level_3: config.unitLevels === 3 ? (editingProduct.price_per_level_3 || '') : ''
+    });
+  };
+
+  const handleEditingFieldAutoCalculation = (
+    field: 'price_per_level_1' | 'price_per_level_2' | 'price_per_level_3' | 'conversion_1_to_2' | 'conversion_2_to_3',
+    value: string
+  ) => {
+    if (!editingProduct) return;
+    setEditingProduct((prev) => {
+      if (!prev) return prev;
+      return applyAutoPriceCalculation(prev, field, value);
     });
   };
 
@@ -293,7 +394,7 @@ const ProductModals: React.FC<ProductModalsProps> = ({
         price_per_level_3: '',
         conversion_1_to_2: '',
         conversion_2_to_3: '',
-        opening_balance_base: '',
+        add_stock_base: '',
         unit: '',
         defaultQty: 1,
         photo: '',
@@ -306,6 +407,8 @@ const ProductModals: React.FC<ProductModalsProps> = ({
     }
   };
 
+
+  /* Commented out - handleDeleteProduct is not currently used
   const handleDeleteProduct = async (productId: number) => {
     try {
       if (!window.confirm('Are you sure you want to delete this product?')) {
@@ -327,7 +430,7 @@ const ProductModals: React.FC<ProductModalsProps> = ({
       setError(error instanceof Error ? error.message : 'Failed to delete product');
     }
   };
-
+  */
   const handlePhotoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
@@ -393,7 +496,7 @@ const ProductModals: React.FC<ProductModalsProps> = ({
         try {
           const errorJson = JSON.parse(errorText);
           throw new Error(errorJson.message || 'Failed to update product');
-        } catch (e) {
+        } catch {
           throw new Error(`Failed to update product: ${errorText}`);
         }
       }
@@ -542,7 +645,7 @@ const ProductModals: React.FC<ProductModalsProps> = ({
                     <input
                       type="number"
                       value={editingProduct.price_per_level_1 || ''}
-                      onChange={(e) => setEditingProduct({...editingProduct, price_per_level_1: e.target.value})}
+                      onChange={(e) => handleEditingFieldAutoCalculation('price_per_level_1', e.target.value)}
                       className="w-full px-3 py-2 border rounded text-gray-700"
                       min="0"
                       step="0.01"
@@ -556,7 +659,7 @@ const ProductModals: React.FC<ProductModalsProps> = ({
                       <input
                         type="number"
                         value={editingProduct.price_per_level_2 || ''}
-                        onChange={(e) => setEditingProduct({...editingProduct, price_per_level_2: e.target.value})}
+                        onChange={(e) => handleEditingFieldAutoCalculation('price_per_level_2', e.target.value)}
                         className="w-full px-3 py-2 border rounded text-gray-700"
                         min="0"
                         step="0.01"
@@ -571,7 +674,7 @@ const ProductModals: React.FC<ProductModalsProps> = ({
                       <input
                         type="number"
                         value={editingProduct.price_per_level_3 || ''}
-                        onChange={(e) => setEditingProduct({...editingProduct, price_per_level_3: e.target.value})}
+                        onChange={(e) => handleEditingFieldAutoCalculation('price_per_level_3', e.target.value)}
                         className="w-full px-3 py-2 border rounded text-gray-700"
                         min="0"
                         step="0.01"
@@ -586,7 +689,7 @@ const ProductModals: React.FC<ProductModalsProps> = ({
                       <input
                         type="number"
                         value={editingProduct.conversion_1_to_2 || ''}
-                        onChange={(e) => setEditingProduct({...editingProduct, conversion_1_to_2: e.target.value})}
+                        onChange={(e) => handleEditingFieldAutoCalculation('conversion_1_to_2', e.target.value)}
                         className="w-full px-3 py-2 border rounded text-gray-700"
                         min="1"
                         step="1"
@@ -601,7 +704,7 @@ const ProductModals: React.FC<ProductModalsProps> = ({
                       <input
                         type="number"
                         value={editingProduct.conversion_2_to_3 || ''}
-                        onChange={(e) => setEditingProduct({...editingProduct, conversion_2_to_3: e.target.value})}
+                        onChange={(e) => handleEditingFieldAutoCalculation('conversion_2_to_3', e.target.value)}
                         className="w-full px-3 py-2 border rounded text-gray-700"
                         min="1"
                         step="1"
@@ -611,11 +714,11 @@ const ProductModals: React.FC<ProductModalsProps> = ({
                   )}
 
                   <div className="mb-4">
-                    <label className="block text-gray-700 mb-2">Opening Balance ({smallestUnit})</label>
+                    <label className="block text-gray-700 mb-2">Add Stock ({smallestUnit})</label>
                     <input
                       type="number"
-                      value={editingProduct.opening_balance_base || ''}
-                      onChange={(e) => setEditingProduct({...editingProduct, opening_balance_base: e.target.value})}
+                      value={editingProduct.add_stock_base || ''}
+                      onChange={(e) => setEditingProduct({...editingProduct, add_stock_base: e.target.value})}
                       className="w-full px-3 py-2 border rounded text-gray-700"
                       min="0"
                       step="1"
@@ -776,7 +879,7 @@ const ProductModals: React.FC<ProductModalsProps> = ({
                       <input
                         type="number"
                         value={newProduct.price_per_level_1}
-                        onChange={(e) => setNewProduct({...newProduct, price_per_level_1: e.target.value})}
+                        onChange={(e) => handleNewFieldAutoCalculation('price_per_level_1', e.target.value)}
                         className="w-full px-3 py-2 border rounded text-gray-700"
                         placeholder="0.00"
                         min="0"
@@ -791,7 +894,7 @@ const ProductModals: React.FC<ProductModalsProps> = ({
                         <input
                           type="number"
                           value={newProduct.price_per_level_2}
-                          onChange={(e) => setNewProduct({...newProduct, price_per_level_2: e.target.value})}
+                          onChange={(e) => handleNewFieldAutoCalculation('price_per_level_2', e.target.value)}
                           className="w-full px-3 py-2 border rounded text-gray-700"
                           placeholder="0.00"
                           min="0"
@@ -807,7 +910,7 @@ const ProductModals: React.FC<ProductModalsProps> = ({
                         <input
                           type="number"
                           value={newProduct.price_per_level_3}
-                          onChange={(e) => setNewProduct({...newProduct, price_per_level_3: e.target.value})}
+                          onChange={(e) => handleNewFieldAutoCalculation('price_per_level_3', e.target.value)}
                           className="w-full px-3 py-2 border rounded text-gray-700"
                           placeholder="0.00"
                           min="0"
@@ -823,7 +926,7 @@ const ProductModals: React.FC<ProductModalsProps> = ({
                         <input
                           type="number"
                           value={newProduct.conversion_1_to_2}
-                          onChange={(e) => setNewProduct({...newProduct, conversion_1_to_2: e.target.value})}
+                          onChange={(e) => handleNewFieldAutoCalculation('conversion_1_to_2', e.target.value)}
                           className="w-full px-3 py-2 border rounded text-gray-700"
                           min="1"
                           step="1"
@@ -838,7 +941,7 @@ const ProductModals: React.FC<ProductModalsProps> = ({
                         <input
                           type="number"
                           value={newProduct.conversion_2_to_3}
-                          onChange={(e) => setNewProduct({...newProduct, conversion_2_to_3: e.target.value})}
+                          onChange={(e) => handleNewFieldAutoCalculation('conversion_2_to_3', e.target.value)}
                           className="w-full px-3 py-2 border rounded text-gray-700"
                           min="1"
                           step="1"
@@ -848,11 +951,11 @@ const ProductModals: React.FC<ProductModalsProps> = ({
                     )}
 
                     <div className="mb-4">
-                      <label className="block text-gray-700 mb-2">Opening Balance ({smallestUnit})</label>
+                      <label className="block text-gray-700 mb-2">Add Stock ({smallestUnit})</label>
                       <input
                         type="number"
-                        value={newProduct.opening_balance_base}
-                        onChange={(e) => setNewProduct({...newProduct, opening_balance_base: e.target.value})}
+                        value={newProduct.add_stock_base}
+                        onChange={(e) => setNewProduct({...newProduct, add_stock_base: e.target.value})}
                         className="w-full px-3 py-2 border rounded text-gray-700"
                         min="0"
                         step="1"
@@ -1013,7 +1116,7 @@ const ProductModals: React.FC<ProductModalsProps> = ({
                       <input
                         type="number"
                         value={editingProduct.price_per_level_1 || ''}
-                        onChange={(e) => setEditingProduct({...editingProduct, price_per_level_1: e.target.value})}
+                        onChange={(e) => handleEditingFieldAutoCalculation('price_per_level_1', e.target.value)}
                         className="w-full px-3 py-2 border rounded text-gray-700"
                         min="0"
                         step="0.01"
@@ -1027,7 +1130,7 @@ const ProductModals: React.FC<ProductModalsProps> = ({
                         <input
                           type="number"
                           value={editingProduct.price_per_level_2 || ''}
-                          onChange={(e) => setEditingProduct({...editingProduct, price_per_level_2: e.target.value})}
+                          onChange={(e) => handleEditingFieldAutoCalculation('price_per_level_2', e.target.value)}
                           className="w-full px-3 py-2 border rounded text-gray-700"
                           min="0"
                           step="0.01"
@@ -1042,7 +1145,7 @@ const ProductModals: React.FC<ProductModalsProps> = ({
                         <input
                           type="number"
                           value={editingProduct.price_per_level_3 || ''}
-                          onChange={(e) => setEditingProduct({...editingProduct, price_per_level_3: e.target.value})}
+                          onChange={(e) => handleEditingFieldAutoCalculation('price_per_level_3', e.target.value)}
                           className="w-full px-3 py-2 border rounded text-gray-700"
                           min="0"
                           step="0.01"
@@ -1057,7 +1160,7 @@ const ProductModals: React.FC<ProductModalsProps> = ({
                         <input
                           type="number"
                           value={editingProduct.conversion_1_to_2 || ''}
-                          onChange={(e) => setEditingProduct({...editingProduct, conversion_1_to_2: e.target.value})}
+                          onChange={(e) => handleEditingFieldAutoCalculation('conversion_1_to_2', e.target.value)}
                           className="w-full px-3 py-2 border rounded text-gray-700"
                           min="1"
                           step="1"
@@ -1072,7 +1175,7 @@ const ProductModals: React.FC<ProductModalsProps> = ({
                         <input
                           type="number"
                           value={editingProduct.conversion_2_to_3 || ''}
-                          onChange={(e) => setEditingProduct({...editingProduct, conversion_2_to_3: e.target.value})}
+                          onChange={(e) => handleEditingFieldAutoCalculation('conversion_2_to_3', e.target.value)}
                           className="w-full px-3 py-2 border rounded text-gray-700"
                           min="1"
                           step="1"
@@ -1082,11 +1185,11 @@ const ProductModals: React.FC<ProductModalsProps> = ({
                     )}
 
                     <div className="mb-4">
-                      <label className="block text-gray-700 mb-2">Opening Balance ({smallestUnit})</label>
+                      <label className="block text-gray-700 mb-2">Add Stock ({smallestUnit})</label>
                       <input
                         type="number"
-                        value={editingProduct.opening_balance_base || ''}
-                        onChange={(e) => setEditingProduct({...editingProduct, opening_balance_base: e.target.value})}
+                        value={editingProduct.add_stock_base || ''}
+                        onChange={(e) => setEditingProduct({...editingProduct, add_stock_base: e.target.value})}
                         className="w-full px-3 py-2 border rounded text-gray-700"
                         min="0"
                         step="1"

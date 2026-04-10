@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import Image from 'next/image';
-import { FaBarcode, FaPlus, FaThLarge, FaBell, FaChartLine, FaTachometerAlt } from 'react-icons/fa';
+import { FaBarcode, FaPlus, FaThLarge, FaBell, FaTachometerAlt } from 'react-icons/fa';
 import { useRouter } from 'next/navigation';
 import ProductModals from './ProductModals';
 import StockModals from './StockModals';

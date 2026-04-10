@@ -1,12 +1,32 @@
 "use client";
 
-import { useState, useMemo } from 'react';
+import { useState } from 'react';
 import { FaPrint, FaFileExcel, FaFileCsv, FaChartBar } from 'react-icons/fa';
 import * as XLSX from 'xlsx';
 
+interface SalesData {
+    id: string;
+    date: string;
+    total: number;
+    subtotal: number;
+    discount: number;
+    items: any[];
+}
+
+interface ProductData {
+    id: string | number;
+    name: string;
+    generic_name?: string;
+    base_stock: number;
+    category?: string;
+    stock?: number;
+    unit?: string;
+    price?: number;
+}
+
 interface ReportsProps {
-    salesData: any[];
-    productData: any[];
+    salesData: SalesData[];
+    productData: ProductData[];
     dateRange: { start: string; end: string };
 }
 
@@ -68,9 +88,9 @@ const Reports: React.FC<ReportsProps> = ({ salesData, productData, dateRange }: 
             ID: sale.id || '-',
             Date: new Date(sale.date).toLocaleDateString(),
             'Total Items': sale.items?.length || 0,
-            Subtotal: parseFloat(sale.subtotal || 0).toFixed(2),
-            Discount: parseFloat(sale.discount || 0).toFixed(2),
-            Total: parseFloat(sale.total || 0).toFixed(2)
+            Subtotal: Number(sale.subtotal ?? 0).toFixed(2),
+            Discount: Number(sale.discount ?? 0).toFixed(2),
+            Total: Number(sale.total ?? 0).toFixed(2)
         }));
 
         return data;

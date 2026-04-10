@@ -1,8 +1,17 @@
 "use client";
 
 import React, { useState, useMemo } from 'react';
-import { FaTrash, FaEdit, FaPlus, FaExclamationTriangle, FaCalendarTimes, FaPrint, FaFileExport, FaSearch } from 'react-icons/fa';
+import { FaTrash, FaEdit, FaPlus, FaExclamationTriangle, FaCalendarTimes, FaFileExport, FaSearch } from 'react-icons/fa';
 import * as XLSX from 'xlsx';
+
+interface UnitConfig {
+  unit_levels?: number;
+  level_1_name?: string | null;
+  level_2_name?: string | null;
+  level_3_name?: string | null;
+  conversion_1_to_2?: number | null;
+  conversion_2_to_3?: number | null;
+}
 
 interface ProductData {
   id: string | number;
@@ -15,7 +24,7 @@ interface ProductData {
   price_per_strip?: number;
   price_per_tablet?: number;
   base_stock: number;
-  unit_config?: any;
+  unit_config?: UnitConfig;
   expiry_date?: string;
 }
 
