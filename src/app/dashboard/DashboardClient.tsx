@@ -3,7 +3,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import dynamic from 'next/dynamic';
-import * as XLSX from 'xlsx';
 import ClientOnly from '../Components/ClientOnly';
 import ProductModals, { type Product as ProductModalProduct } from '../Components/ProductModals';
 import StockModals, { type Product as StockModalProduct } from '../Components/StockModals';
@@ -15,13 +14,16 @@ import {
     FaTrash, FaPrint, FaSearch, FaDownload, FaFilter, FaTimes,
     FaCheckCircle, FaReceipt, FaUndo
 } from 'react-icons/fa';
-import Reports from '../Components/Reports';
 import InventoryAlerts from '../Components/InventoryAlerts';
 import Toast from '../Components/Toast';
 import ClearDataButton from '../Components/ClearDataButton';
 
 // Dynamic import for client-only chart components
 const Chart = dynamic(() => import('react-apexcharts'), { ssr: false });
+const Reports = dynamic(() => import('../Components/Reports'), {
+    ssr: false,
+    loading: () => <div className="p-4 text-sm text-gray-500">Loading reports...</div>
+});
 
 interface CartItem {
     id: string;
@@ -47,6 +49,60 @@ interface SalesData {
         line_total?: number;
         unit?: string;
     }>;
+}
+
+interface ReturnItemData {
+    id: number;
+    return_transaction_id?: number;
+    sale_id: number;
+    product_id: number;
+    return_qty_base: number;
+    refund_amount: number;
+    return_invoice_no?: string;
+    created_at?: string;
+    product_name?: string;
+}
+
+interface ReturnTransactionData {
+    id: number;
+    original_sale_id: number;
+    return_invoice_no: string;
+    total_refunded: number;
+    created_at: string;
+    date: string;
+    original_sale_total?: number;
+    original_subtotal?: number;
+    original_discount?: number;
+    original_amount_received?: number;
+    original_change_return?: number;
+    items: ReturnItemData[];
+}
+
+interface ReturnItemData {
+    id: number;
+    return_transaction_id?: number;
+    sale_id: number;
+    product_id: number;
+    return_qty_base: number;
+    refund_amount: number;
+    return_invoice_no?: string;
+    created_at?: string;
+    product_name?: string;
+}
+
+interface ReturnTransactionData {
+    id: number;
+    original_sale_id: number;
+    return_invoice_no: string;
+    total_refunded: number;
+    created_at: string;
+    date: string;
+    original_sale_total?: number;
+    original_subtotal?: number;
+    original_discount?: number;
+    original_amount_received?: number;
+    original_change_return?: number;
+    items: ReturnItemData[];
 }
 
 // Update your ProductData interface to match the Product interface in ProductModals
@@ -103,6 +159,7 @@ interface CategoryFormState {
 
 const Dashboard: React.FC = () => {
     const [salesData, setSalesData] = useState<SalesData[]>([]);
+    const [returnsData, setReturnsData] = useState<ReturnTransactionData[]>([]);
     const [productData, setProductData] = useState<ProductData[]>([]);
     const [filteredProducts, setFilteredProducts] = useState<ProductData[]>([]);
     const [analytics, setAnalytics] = useState<SalesAnalytics>({
@@ -143,6 +200,7 @@ const Dashboard: React.FC = () => {
     const isClient = typeof window !== 'undefined';
 
     const [selectedSale, setSelectedSale] = useState<SalesData | null>(null);
+    const [selectedReturnTransaction, setSelectedReturnTransaction] = useState<ReturnTransactionData | null>(null);
     // const [showSaleDetails, setShowSaleDetails] = useState<boolean>(false); // unused
 
     // States for ProductModals
@@ -160,6 +218,7 @@ const Dashboard: React.FC = () => {
 
     // State for Receipt view
     const [viewReceipt, setViewReceipt] = useState<boolean>(false);
+    const [viewReturnReceipt, setViewReturnReceipt] = useState<boolean>(false);
     const [returnSaleData, setReturnSaleData] = useState<SalesData | null>(null);
     const [isReturnModalOpen, setIsReturnModalOpen] = useState<boolean>(false);
     const [returnQuantities, setReturnQuantities] = useState<Record<string, ReturnQtyState>>({});
@@ -167,6 +226,7 @@ const Dashboard: React.FC = () => {
 
     // New state for search
     const [salesSearchTerm, setSalesSearchTerm] = useState<string>('');
+    const [returnsSearchTerm, setReturnsSearchTerm] = useState<string>('');
 
     // Add these states for toast management
     const [toastState, setToastState] = useState<{ message: string; type: 'success' | 'error' | 'info' } | null>(null);
@@ -198,6 +258,25 @@ const Dashboard: React.FC = () => {
         );
     }, [salesData, salesSearchTerm]);
 
+    const filteredReturnsData = useMemo(() => {
+        if (!returnsSearchTerm.trim()) {
+            return returnsData;
+        }
+
+        const query = returnsSearchTerm.toLowerCase();
+
+        return returnsData.filter((returnTransaction) => {
+            const returnInvoice = returnTransaction.return_invoice_no.toLowerCase();
+            const originalSale = returnTransaction.original_sale_id.toString();
+            const itemMatches = returnTransaction.items.some((item) =>
+                getReturnItemName(item).toLowerCase().includes(query) ||
+                item.product_id.toString().includes(query)
+            );
+
+            return returnInvoice.includes(query) || originalSale.includes(query) || itemMatches;
+        });
+    }, [returnsData, returnsSearchTerm]);
+
     // Navigation functions
     // const navigateToHome = () => { // unused
     //     router.push('/');
@@ -213,6 +292,11 @@ const Dashboard: React.FC = () => {
     const handleViewReceiptModal = (sale: SalesData) => {
         setSelectedSale(sale);
         setViewReceipt(true);
+    };
+
+    const handleViewReturnReceiptModal = (returnTransaction: ReturnTransactionData) => {
+        setSelectedReturnTransaction(returnTransaction);
+        setViewReturnReceipt(true);
     };
 
     const getReturnItemKey = (saleId: string, productId: string) => `${saleId}-${productId}`;
@@ -259,12 +343,25 @@ const Dashboard: React.FC = () => {
         return `Product #${saleItem.product_id}`;
     };
 
+    const getReturnItemName = (returnItem: ReturnItemData): string => {
+        if (returnItem.product_name && returnItem.product_name.trim()) {
+            return returnItem.product_name;
+        }
+
+        return `Product #${returnItem.product_id}`;
+    };
+
     const getSaleItemUnit = (saleItem: SalesData['items'][number]): string => {
         if (saleItem.unit && saleItem.unit.trim()) {
             return saleItem.unit;
         }
 
         const product = getProductForSaleItem(saleItem);
+        return product?.unit_config?.level_3_name || product?.unit_config?.level_1_name || 'Unit';
+    };
+
+    const getReturnItemUnit = (returnItem: ReturnItemData): string => {
+        const product = productData.find((p) => p.id?.toString() === returnItem.product_id?.toString());
         return product?.unit_config?.level_3_name || product?.unit_config?.level_1_name || 'Unit';
     };
 
@@ -374,6 +471,41 @@ const Dashboard: React.FC = () => {
         return qtyBase * getSaleItemPrice(saleItem);
     };
 
+    const getReturnItemQuantity = (returnItem: ReturnItemData): number => {
+        const quantity = Number(returnItem.return_qty_base ?? 0);
+        return Number.isFinite(quantity) ? quantity : 0;
+    };
+
+    const getReturnItemPrice = (returnItem: ReturnItemData): number => {
+        const quantity = getReturnItemQuantity(returnItem);
+        const refundAmount = Number(returnItem.refund_amount ?? 0);
+        if (quantity > 0) {
+            return refundAmount / quantity;
+        }
+
+        return 0;
+    };
+
+    const convertReturnItemsToCartItems = (returnTransaction: ReturnTransactionData): CartItem[] => {
+        return returnTransaction.items.map((item) => ({
+            id: item.product_id.toString(),
+            name: getReturnItemName(item),
+            qty: getReturnItemQuantity(item),
+            price: getReturnItemPrice(item),
+            unit: getReturnItemUnit(item),
+            lineTotal: Number(item.refund_amount ?? 0),
+            formattedQty: `${getReturnItemQuantity(item)} ${getReturnItemUnit(item)}`
+        }));
+    };
+
+    const calculateReturnReceiptSubtotal = (returnTransaction: ReturnTransactionData): string => {
+        return Number(returnTransaction.total_refunded ?? 0).toFixed(2);
+    };
+
+    const calculateReturnReceiptTotal = (returnTransaction: ReturnTransactionData): string => {
+        return Number(returnTransaction.total_refunded ?? 0).toFixed(2);
+    };
+
     const totalRefundAmount = useMemo(() => {
         if (!returnSaleData) return 0;
         return returnSaleData.items.reduce((sum, saleItem) => sum + getReturnRefundAmount(saleItem), 0);
@@ -407,6 +539,10 @@ const Dashboard: React.FC = () => {
 
     // A dummy function that resolves immediately since we're viewing an existing sale
     const dummySaveSale = async (): Promise<boolean> => {
+        return true;
+    };
+
+    const dummySaveReturnReceipt = async (): Promise<boolean> => {
         return true;
     };
 
@@ -835,8 +971,9 @@ const Dashboard: React.FC = () => {
     };
 
     // Export sales to Excel
-    const handleExportSales = () => {
+    const handleExportSales = async () => {
         try {
+            const XLSX = await import('xlsx');
             const worksheet = XLSX.utils.json_to_sheet(
                 salesData.map(sale => ({
                     'Order ID': sale.id,
@@ -863,8 +1000,9 @@ const Dashboard: React.FC = () => {
     };
     
     // Export inventory to Excel
-    const handleExportInventory = () => {
+    const handleExportInventory = async () => {
         try {
+            const XLSX = await import('xlsx');
             const worksheet = XLSX.utils.json_to_sheet(
                 productData.map(product => ({
                     'ID': product.id,
@@ -967,6 +1105,15 @@ const Dashboard: React.FC = () => {
                 if (!categoriesResponse.ok) throw new Error('Failed to fetch categories');
                 const categories = await categoriesResponse.json();
                 setCategoriesData(categories);
+
+                const returnsResponse = await fetch('http://localhost:5000/api/returns');
+                if (!returnsResponse.ok) throw new Error('Failed to fetch returns data');
+                const returnsData = await returnsResponse.json() as ReturnTransactionData[];
+                const filteredReturns = returnsData.filter((returnTransaction: ReturnTransactionData) => {
+                    const returnDate = new Date(returnTransaction.date).toISOString().split('T')[0];
+                    return returnDate >= dateRange.start && returnDate <= dateRange.end;
+                });
+                setReturnsData(filteredReturns);
                 
             } catch (err) {
                 console.error('Error fetching data:', err);
@@ -1012,12 +1159,17 @@ const Dashboard: React.FC = () => {
 
     // Prepare chart data for sales
     const salesChartData = useMemo(() => {
-        // Group sales by date
+        // Group sales by date and subtract refunds recorded for the same date range
         const salesByDate: Record<string, number> = {};
         
         salesData.forEach(sale => {
             const date = new Date(sale.date).toLocaleDateString();
             salesByDate[date] = (salesByDate[date] || 0) + parseFloat(sale.total.toString());
+        });
+
+        returnsData.forEach(returnTransaction => {
+            const date = new Date(returnTransaction.date).toLocaleDateString();
+            salesByDate[date] = (salesByDate[date] || 0) - Number(returnTransaction.total_refunded || 0);
         });
         
         // Convert to arrays for the chart
@@ -1078,7 +1230,7 @@ const Dashboard: React.FC = () => {
                 }
             ]
         };
-    }, [salesData]);
+    }, [salesData, returnsData]);
 
     // Product category chart data
     const categoryChartData = useMemo(() => {
@@ -1121,7 +1273,7 @@ const Dashboard: React.FC = () => {
 
     // Prepare top selling products
     const topSellingProducts = useMemo(() => {
-        // Count product occurrences in sales
+        // Count product occurrences in sales and subtract returned quantities/revenue
         const productCounts: Record<string, { count: number, revenue: number }> = {};
         
         salesData.forEach(sale => {
@@ -1139,6 +1291,24 @@ const Dashboard: React.FC = () => {
 
                 productCounts[productId].count += Number.isFinite(quantity) ? quantity : 0;
                 productCounts[productId].revenue += (Number.isFinite(quantity) ? quantity : 0) * (Number.isFinite(price) ? price : 0);
+            });
+        });
+
+        returnsData.forEach((returnTransaction) => {
+            returnTransaction.items.forEach((item) => {
+                const productId = item.product_id?.toString();
+
+                if (!productId) return;
+
+                if (!productCounts[productId]) {
+                    productCounts[productId] = { count: 0, revenue: 0 };
+                }
+
+                const quantity = Number(item.return_qty_base ?? 0);
+                const refundAmount = Number(item.refund_amount ?? 0);
+
+                productCounts[productId].count -= Number.isFinite(quantity) ? quantity : 0;
+                productCounts[productId].revenue -= Number.isFinite(refundAmount) ? refundAmount : 0;
             });
         });
         
@@ -1159,7 +1329,7 @@ const Dashboard: React.FC = () => {
             .slice(0, 5); // Get top 5
         
         return sortedProducts;
-    }, [salesData, productData]); // Add productData as a dependency
+    }, [salesData, returnsData, productData]); // Add productData as a dependency
 
     // Get low stock products
     const lowStockProducts = useMemo(() => {
@@ -1212,6 +1382,38 @@ const Dashboard: React.FC = () => {
         }
     };
 
+    const fetchReturnsData = async () => {
+        try {
+            const returnsResponse = await fetch('http://localhost:5000/api/returns');
+            if (!returnsResponse.ok) throw new Error('Failed to fetch returns data');
+            const returnsData = await returnsResponse.json() as ReturnTransactionData[];
+
+            const filteredReturns = returnsData.filter((returnTransaction: ReturnTransactionData) => {
+                const returnDate = new Date(returnTransaction.date).toISOString().split('T')[0];
+                return returnDate >= dateRange.start && returnDate <= dateRange.end;
+            });
+
+            setReturnsData(filteredReturns);
+        } catch (error) {
+            console.error('Error fetching returns data:', error);
+            setError('Failed to load return data');
+        }
+    };
+
+    useEffect(() => {
+        const grossRevenue = salesData.reduce((sum, sale) => sum + Number(sale.total ?? 0), 0);
+        const refundedRevenue = returnsData.reduce((sum, returnTransaction) => sum + Number(returnTransaction.total_refunded ?? 0), 0);
+        const netRevenue = grossRevenue - refundedRevenue;
+        const averageOrderValue = salesData.length ? netRevenue / salesData.length : 0;
+
+        setAnalytics((prev) => ({
+            ...prev,
+            totalSales: salesData.length,
+            totalRevenue: netRevenue,
+            averageOrderValue
+        }));
+    }, [salesData, returnsData]);
+
     const submitReturn = async () => {
         if (!returnSaleData) return;
 
@@ -1254,7 +1456,7 @@ const Dashboard: React.FC = () => {
             setReturnSaleData(null);
             setReturnQuantities({});
 
-            await Promise.all([fetchSalesData(), refreshProductData()]);
+            await Promise.all([fetchReturnsData(), refreshProductData()]);
         } catch (error) {
             console.error('Error processing return:', error);
             toastActions.error('Failed to process return');
@@ -1282,7 +1484,11 @@ const Dashboard: React.FC = () => {
               toastActions.info("All data has been reset");
                         } else if (resetType === 'sales') {
                             fetchSalesData();
+                            fetchReturnsData();
               toastActions.info("Sales data has been reset");
+                        } else if (resetType === 'returns') {
+                            fetchReturnsData();
+              toastActions.info("Return data has been reset");
                         } else if (resetType === 'inventory' || resetType === 'stock' || resetType === 'alerts') {
                             refreshProductData();
               toastActions.info("Inventory data has been reset");
@@ -1658,6 +1864,70 @@ const Dashboard: React.FC = () => {
                                                 {filteredSalesData.length === 0 && (
                                                     <div className="text-center py-8 text-gray-600">
                                                         {salesSearchTerm ? 'No sales found matching your search.' : 'No sales data available.'}
+                                                    </div>
+                                                )}
+                                            </div>
+                                        </div>
+                                    </div>
+                                ) : activeTab === 'returns' ? (
+                                    <div className="p-3">
+                                        <div className="bg-white p-3 rounded-lg shadow-sm">
+                                            <div className="flex justify-between items-center mb-3">
+                                                <h2 className="text-xl font-semibold text-gray-800">Returned / Refunded Sales</h2>
+                                                <ClearDataButton 
+                                                    onSuccess={handleDataCleared} 
+                                                    activeTab={activeTab}
+                                                />
+                                            </div>
+
+                                            <div className="mb-3 relative">
+                                                <input
+                                                    type="text"
+                                                    placeholder="Search by return invoice or original sale..."
+                                                    value={returnsSearchTerm}
+                                                    onChange={(e) => setReturnsSearchTerm(e.target.value)}
+                                                    className="w-full md:w-80 pl-10 pr-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-500"
+                                                />
+                                                <FaSearch className="absolute left-3 top-3 text-gray-500" />
+                                            </div>
+
+                                            <div className="overflow-x-auto">
+                                                <table className="w-full text-sm text-left">
+                                                    <thead className="bg-gray-300 text-gray-800">
+                                                        <tr>
+                                                            <th className="px-6 py-3">Return Invoice</th>
+                                                            <th className="px-6 py-3">Original Sale</th>
+                                                            <th className="px-6 py-3">Date</th>
+                                                            <th className="px-6 py-3">Items</th>
+                                                            <th className="px-6 py-3">Refund</th>
+                                                            <th className="px-6 py-3">Actions</th>
+                                                        </tr>
+                                                    </thead>
+                                                    <tbody>
+                                                        {filteredReturnsData.map((returnTransaction) => (
+                                                            <tr key={returnTransaction.id} className="border-b hover:bg-gray-50">
+                                                                <td className="px-6 py-4 text-gray-700 font-medium">{returnTransaction.return_invoice_no}</td>
+                                                                <td className="px-6 py-4 text-gray-700">Sale #{returnTransaction.original_sale_id}</td>
+                                                                <td className="px-6 py-4 text-gray-700">{new Date(returnTransaction.date).toLocaleDateString()}</td>
+                                                                <td className="px-6 py-4 text-gray-700">{returnTransaction.items.length}</td>
+                                                                <td className="px-6 py-4 text-gray-700">Rs. {Number(returnTransaction.total_refunded || 0).toFixed(2)}</td>
+                                                                <td className="px-6 py-4">
+                                                                    <button
+                                                                        onClick={() => handleViewReturnReceiptModal(returnTransaction)}
+                                                                        className="bg-orange-600 hover:bg-orange-700 text-white p-2 rounded"
+                                                                        title="View Return Receipt"
+                                                                    >
+                                                                        <FaUndo size={16} />
+                                                                    </button>
+                                                                </td>
+                                                            </tr>
+                                                        ))}
+                                                    </tbody>
+                                                </table>
+
+                                                {filteredReturnsData.length === 0 && (
+                                                    <div className="text-center py-8 text-gray-600">
+                                                        {returnsSearchTerm ? 'No returned sales found matching your search.' : 'No refunded sales data available.'}
                                                     </div>
                                                 )}
                                             </div>
@@ -2218,6 +2488,26 @@ const Dashboard: React.FC = () => {
                         onClose={() => setViewReceipt(false)}
                         saveSale={dummySaveSale}
                         orderNumber={selectedSale.id.toString()} // Pass the original ID without formatting
+                    />
+                )}
+
+                {viewReturnReceipt && selectedReturnTransaction && (
+                    <ReceiptModal
+                        items={convertReturnItemsToCartItems(selectedReturnTransaction)}
+                        discount={0}
+                        calculateSubtotal={() => calculateReturnReceiptSubtotal(selectedReturnTransaction)}
+                        calculateTotal={() => calculateReturnReceiptTotal(selectedReturnTransaction)}
+                        handlePrint={handlePrint}
+                        onClose={() => {
+                            setViewReturnReceipt(false);
+                            setSelectedReturnTransaction(null);
+                        }}
+                        saveSale={dummySaveReturnReceipt}
+                        orderNumber={selectedReturnTransaction.return_invoice_no}
+                        receiptTitle="Return Receipt"
+                        orderLabel="Return Invoice #"
+                        linkedSaleNumber={selectedReturnTransaction.original_sale_id.toString()}
+                        primaryActionLabel="Print Return Receipt"
                     />
                 )}
 

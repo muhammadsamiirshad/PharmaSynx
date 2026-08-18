@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { FaPrint, FaFileExcel, FaFileCsv, FaChartBar } from 'react-icons/fa';
 import * as XLSX from 'xlsx';
 
@@ -166,8 +166,8 @@ const Reports: React.FC<ReportsProps> = ({ salesData, productData, dateRange }: 
         return data;
     };
 
-    // Get the current report data based on the selected type
-    const getCurrentReportData = () => {
+    // Memoize report generation to avoid rebuilding large tables repeatedly in one render.
+    const currentReportData = useMemo(() => {
         switch (reportType) {
             case 'sales':
                 return generateSalesReport();
@@ -180,12 +180,12 @@ const Reports: React.FC<ReportsProps> = ({ salesData, productData, dateRange }: 
             default:
                 return [];
         }
-    };
+    }, [reportType, salesData, productData]);
 
     // Handle export to Excel
     const handleExportToExcel = () => {
         try {
-            const data = getCurrentReportData();
+            const data = currentReportData;
             const filename = `${reportType}_report_${new Date().toISOString().slice(0, 10)}`;
             exportToExcel(data, filename);
         } catch (error) {
@@ -197,7 +197,7 @@ const Reports: React.FC<ReportsProps> = ({ salesData, productData, dateRange }: 
     // Handle export to CSV
     const handleExportToCSV = () => {
         try {
-            const data = getCurrentReportData();
+            const data = currentReportData;
             let headers: string[] = [];
             
             // Get headers from first object
@@ -231,7 +231,7 @@ const Reports: React.FC<ReportsProps> = ({ salesData, productData, dateRange }: 
 
     // Handle print function
     const handlePrintReport = () => {
-        const reportData = getCurrentReportData();
+        const reportData = currentReportData;
         const reportTitle = `${reportType.charAt(0).toUpperCase() + reportType.slice(1)} Report`;
         
         const printWindow = window.open('', '_blank');
@@ -350,8 +350,8 @@ const Reports: React.FC<ReportsProps> = ({ salesData, productData, dateRange }: 
                     <table className="min-w-full divide-y divide-gray-200">
                         <thead className="bg-gray-300 ">
                             <tr>
-                                {getCurrentReportData().length > 0 && 
-                                    Object.keys(getCurrentReportData()[0]).map((header, index) => (
+                                {currentReportData.length > 0 && 
+                                    Object.keys(currentReportData[0]).map((header, index) => (
                                         <th 
                                             key={index}
                                             scope="col" 
@@ -364,7 +364,7 @@ const Reports: React.FC<ReportsProps> = ({ salesData, productData, dateRange }: 
                             </tr>
                         </thead>
                         <tbody className="bg-white divide-y divide-gray-200 ">
-                            {getCurrentReportData().slice(0, 5).map((item, rowIndex) => (
+                            {currentReportData.slice(0, 5).map((item, rowIndex) => (
                                 <tr key={rowIndex}>
                                     {Object.values(item).map((value, cellIndex) => (
                                         <td 
@@ -378,14 +378,14 @@ const Reports: React.FC<ReportsProps> = ({ salesData, productData, dateRange }: 
                             ))}
                         </tbody>
                     </table>
-                    {getCurrentReportData().length === 0 && (
+                    {currentReportData.length === 0 && (
                         <div className="py-8 text-center text-gray-500">
                             No data available for the selected report type
                         </div>
                     )}
-                    {getCurrentReportData().length > 5 && (
+                    {currentReportData.length > 5 && (
                         <div className="mt-2 text-right text-xs text-gray-500">
-                            Showing 5 of {getCurrentReportData().length} entries
+                            Showing 5 of {currentReportData.length} entries
                         </div>
                     )}
                 </div>
@@ -396,7 +396,7 @@ const Reports: React.FC<ReportsProps> = ({ salesData, productData, dateRange }: 
                 <button
                     onClick={handleExportToExcel}
                     className="flex items-center px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700 transition-colors"
-                    disabled={getCurrentReportData().length === 0}
+                    disabled={currentReportData.length === 0}
                 >
                     <FaFileExcel className="mr-2" />
                     Export to Excel
@@ -405,7 +405,7 @@ const Reports: React.FC<ReportsProps> = ({ salesData, productData, dateRange }: 
                 <button
                     onClick={handleExportToCSV}
                     className="flex items-center px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors"
-                    disabled={getCurrentReportData().length === 0}
+                    disabled={currentReportData.length === 0}
                 >
                     <FaFileCsv className="mr-2" />
                     Export to CSV
@@ -414,7 +414,7 @@ const Reports: React.FC<ReportsProps> = ({ salesData, productData, dateRange }: 
                 <button
                     onClick={handlePrintReport}
                     className="flex items-center px-4 py-2 bg-gray-600 text-white rounded hover:bg-gray-700 transition-colors"
-                    disabled={getCurrentReportData().length === 0}
+                    disabled={currentReportData.length === 0}
                 >
                     <FaPrint className="mr-2" />
                     Print Report

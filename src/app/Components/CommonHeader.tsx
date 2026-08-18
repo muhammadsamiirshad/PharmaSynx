@@ -10,6 +10,7 @@ import {
   FaBoxOpen, 
   FaChartBar,
   FaExclamationTriangle,
+  FaUndo,
   FaCog
 } from 'react-icons/fa';
 import { useRouter } from 'next/navigation';
@@ -157,6 +158,15 @@ const CommonHeader: React.FC<CommonHeaderProps> = ({
               >
                 <FaShoppingCart className="inline mr-2" />
                 Sales
+              </button>
+              <button 
+                onClick={() => handleTabChange('returns')} 
+                className={`px-5 py-2 font-medium ${activeTab === 'returns' 
+                  ? 'bg-white text-teal-700' 
+                  : 'bg-transparent hover:bg-teal-600 text-white'}`}
+              >
+                <FaUndo className="inline mr-2" />
+                Returns
               </button>
               <button 
                 onClick={() => handleTabChange('inventory')} 

@@ -316,7 +316,18 @@ const ProductModals: React.FC<ProductModalsProps> = ({
     if (!editingProduct) return;
     setEditingProduct((prev) => {
       if (!prev) return prev;
-      return applyAutoPriceCalculation(prev, field, value);
+
+      const normalized = {
+        ...prev,
+        category: prev.category || '',
+        price_per_level_1: prev.price_per_level_1 || '',
+        price_per_level_2: prev.price_per_level_2 || '',
+        price_per_level_3: prev.price_per_level_3 || '',
+        conversion_1_to_2: prev.conversion_1_to_2 || '',
+        conversion_2_to_3: prev.conversion_2_to_3 || ''
+      };
+
+      return applyAutoPriceCalculation(normalized, field, value);
     });
   };
 

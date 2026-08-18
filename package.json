@@ -48,20 +48,28 @@
   "build": {
     "appId": "com.pharmasynx.app",
     "productName": "PharmaSynx",
-    "asar": false,
+    "asar": true,
+    "asarUnpack": [
+      "**/*.node"
+    ],
     "directories": {
       "output": "dist"
     },
     "files": [
       "main.js",
       "server.js",
-      "electron/preload.js",
+      "electron/**/*",
       "next.config.mjs",
       "public/**/*",
       ".next/**/*",
-      "src/**/*",
       "node_modules/**/*",
-      "package.json"
+      "package.json",
+      "!src/**/*",
+      "!**/*.map",
+      "!**/*.md",
+      "!**/__tests__/**/*",
+      "!**/test/**/*",
+      "!**/.cache/**/*"
     ],
     "win": {
       "target": [

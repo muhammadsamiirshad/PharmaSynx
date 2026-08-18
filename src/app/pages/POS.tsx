@@ -594,24 +594,6 @@ const POS: React.FC = () => {
             setPaidAmount(receivedAmount);
             setChangeAmount(change);
 
-            // Update products stock - NOW we actually update the database
-            for (const item of items) {
-                const productIndex = products.findIndex(p => String(p.id) === String(item.id));
-                if (productIndex !== -1) {
-                    const updatedBaseStock = Math.max(0, products[productIndex].base_stock ?? products[productIndex].stock ?? 0);
-                    
-                    await fetch(`http://localhost:5000/api/products/${item.id}/stock`, {
-                        method: 'PUT',
-                        headers: {
-                            'Content-Type': 'application/json',
-                        },
-                        body: JSON.stringify({
-                            base_stock: updatedBaseStock
-                        })
-                    });
-                }
-            }
-
             // Show the receipt with the correct order number
             closePaymentModal();
             setShowReceipt(true);

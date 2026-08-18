@@ -120,6 +120,26 @@ const ensureCategorySchemaColumns = async () => {
         }
     };
 
+const ensureReturnSchemaColumns = async () => {
+    const columns = await db.all(`PRAGMA table_info(returns)`);
+    const existing = new Set(columns.map((col) => col.name));
+    const migrations = [
+        { name: 'return_transaction_id', sql: 'ALTER TABLE returns ADD COLUMN return_transaction_id INTEGER' },
+        { name: 'return_invoice_no', sql: 'ALTER TABLE returns ADD COLUMN return_invoice_no TEXT' }
+    ];
+
+    for (const migration of migrations) {
+        if (!existing.has(migration.name)) {
+            await db.exec(migration.sql);
+        }
+    }
+};
+
+const generateReturnInvoiceNo = (saleId) => {
+    const timestamp = new Date().toISOString().replace(/[-:.TZ]/g, '').slice(0, 14);
+    return `RTN-${saleId}-${timestamp}`;
+};
+
 // Update the database initialization
 async function initializeDatabase() {
     try {
@@ -175,18 +195,31 @@ async function initializeDatabase() {
 
             CREATE TABLE IF NOT EXISTS returns (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
+                return_transaction_id INTEGER,
                 sale_id INTEGER,
                 product_id INTEGER,
                 return_qty_base INTEGER,
                 refund_amount REAL,
+                return_invoice_no TEXT,
                 created_at TEXT DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY (sale_id) REFERENCES sales (id),
+                FOREIGN KEY (return_transaction_id) REFERENCES return_transactions (id),
                 FOREIGN KEY (product_id) REFERENCES products (id)
+            );
+
+            CREATE TABLE IF NOT EXISTS return_transactions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                original_sale_id INTEGER NOT NULL,
+                return_invoice_no TEXT NOT NULL UNIQUE,
+                total_refunded REAL DEFAULT 0,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (original_sale_id) REFERENCES sales (id)
             );
         `);
 
         await ensureCategorySchemaColumns();
         await ensureSalesSchemaColumns();
+        await ensureReturnSchemaColumns();
 
         console.log('Database initialized successfully');
     } catch (err) {
@@ -567,6 +600,11 @@ initializeDatabase().then(() => {
                     'UPDATE products SET base_stock = MAX(base_stock - ?, 0) WHERE id = ?',
                     [item.qty, item.product_id]
                 );
+
+                const updatedProduct = await db.get('SELECT * FROM products WHERE id = ?', [item.product_id]);
+                if (updatedProduct) {
+                    notifyClients('product_update', { product: updatedProduct });
+                }
             }
             
             // Commit transaction
@@ -601,6 +639,24 @@ initializeDatabase().then(() => {
         try {
             await db.run('BEGIN TRANSACTION');
 
+            const originalSaleId = Number(items[0].sale_id);
+            if (!Number.isFinite(originalSaleId)) {
+                throw new Error('A valid sale_id is required for returns');
+            }
+
+            const mixedSaleIds = items.some((item) => Number(item.sale_id) !== originalSaleId);
+            if (mixedSaleIds) {
+                throw new Error('All returned items must belong to the same original sale');
+            }
+
+            const returnInvoiceNo = generateReturnInvoiceNo(originalSaleId);
+            const transactionResult = await db.run(
+                `INSERT INTO return_transactions (original_sale_id, return_invoice_no, total_refunded, created_at)
+                 VALUES (?, ?, ?, datetime('now', 'localtime'))`,
+                [originalSaleId, returnInvoiceNo, 0]
+            );
+            const returnTransactionId = transactionResult.lastID;
+
             for (const item of items) {
                 const { sale_id, product_id, return_qty_base, refund_amount } = item;
 
@@ -609,9 +665,9 @@ initializeDatabase().then(() => {
                 }
 
                 await db.run(
-                    `INSERT INTO returns (sale_id, product_id, return_qty_base, refund_amount)
-                     VALUES (?, ?, ?, ?)`,
-                    [sale_id, product_id, return_qty_base, refund_amount]
+                    `INSERT INTO returns (return_transaction_id, sale_id, product_id, return_qty_base, refund_amount, return_invoice_no)
+                     VALUES (?, ?, ?, ?, ?, ?)`,
+                    [returnTransactionId, sale_id, product_id, return_qty_base, refund_amount, returnInvoiceNo]
                 );
 
                 await db.run(
@@ -627,12 +683,20 @@ initializeDatabase().then(() => {
                 totalRefunded += Number(refund_amount) || 0;
             }
 
+            await db.run(
+                'UPDATE return_transactions SET total_refunded = ? WHERE id = ?',
+                [totalRefunded, returnTransactionId]
+            );
+
             await db.run('COMMIT');
 
             res.status(200).json({
                 success: true,
                 message: 'Return processed successfully',
-                total_refunded: totalRefunded
+                total_refunded: totalRefunded,
+                return_transaction_id: returnTransactionId,
+                return_invoice_no: returnInvoiceNo,
+                original_sale_id: originalSaleId
             });
         } catch (error) {
             await db.run('ROLLBACK');
@@ -685,6 +749,47 @@ initializeDatabase().then(() => {
         }
     });
 
+    app.get('/api/returns', async (req, res) => {
+        try {
+            const returnTransactions = await db.all(`
+                SELECT
+                    rt.id,
+                    rt.original_sale_id,
+                    rt.return_invoice_no,
+                    rt.total_refunded,
+                    rt.created_at,
+                    rt.created_at AS date,
+                    s.total AS original_sale_total,
+                    s.subtotal AS original_subtotal,
+                    s.discount AS original_discount,
+                    s.amount_received AS original_amount_received,
+                    s.change_return AS original_change_return
+                FROM return_transactions rt
+                LEFT JOIN sales s ON s.id = rt.original_sale_id
+                ORDER BY rt.created_at DESC
+            `);
+
+            for (const returnTransaction of returnTransactions) {
+                const items = await db.all(`
+                    SELECT
+                        r.*,
+                        p.name AS product_name
+                    FROM returns r
+                    LEFT JOIN products p ON p.id = r.product_id
+                    WHERE r.return_transaction_id = ?
+                    ORDER BY r.id ASC
+                `, [returnTransaction.id]);
+
+                returnTransaction.items = items;
+            }
+
+            res.json(returnTransactions);
+        } catch (err) {
+            console.error('Fetch returns error:', err);
+            res.status(500).json({ error: err.message });
+        }
+    });
+
     // Add this temporary route to server.js to check your database schema
     app.get('/api/debug/schema', async (req, res) => {
         try {
@@ -706,7 +811,7 @@ initializeDatabase().then(() => {
             const { tabType } = req.body;
             
             // Validate tab type
-            const validTabs = ['overview', 'sales', 'inventory', 'stock', 'reports', 'alerts', 'all'];
+            const validTabs = ['overview', 'sales', 'returns', 'inventory', 'stock', 'reports', 'alerts', 'all'];
             if (!validTabs.includes(tabType)) {
                 return res.status(400).json({ 
                     success: false, 
@@ -717,21 +822,31 @@ initializeDatabase().then(() => {
             // Handle different tab types
             if (tabType === 'all' || tabType === 'overview') {
                 // Delete all data (original behavior)
+                await db.run('DELETE FROM returns');
+                await db.run('DELETE FROM return_transactions');
                 await db.run('DELETE FROM sale_items');
                 await db.run('DELETE FROM sales');
                 await db.run('DELETE FROM products');
-                await db.run('DELETE FROM sqlite_sequence WHERE name IN (\'products\', \'sales\', \'sale_items\')');
+                await db.run('DELETE FROM sqlite_sequence WHERE name IN (\'products\', \'sales\', \'sale_items\', \'returns\', \'return_transactions\')');
                 
                 // Notify clients that all data has been reset
                 notifyClients('data_reset', { message: 'All data has been cleared', type: 'all' });
             } else if (tabType === 'sales') {
                 // Delete only sales data
+                await db.run('DELETE FROM returns');
+                await db.run('DELETE FROM return_transactions');
                 await db.run('DELETE FROM sale_items');
                 await db.run('DELETE FROM sales');
-                await db.run('DELETE FROM sqlite_sequence WHERE name IN (\'sales\', \'sale_items\')');
+                await db.run('DELETE FROM sqlite_sequence WHERE name IN (\'sales\', \'sale_items\', \'returns\', \'return_transactions\')');
                 
                 // Notify clients that sales data has been reset
                 notifyClients('data_reset', { message: 'Sales data has been cleared', type: 'sales' });
+            } else if (tabType === 'returns') {
+                await db.run('DELETE FROM returns');
+                await db.run('DELETE FROM return_transactions');
+                await db.run('DELETE FROM sqlite_sequence WHERE name IN (\'returns\', \'return_transactions\')');
+
+                notifyClients('data_reset', { message: 'Return data has been cleared', type: 'returns' });
             } else if (tabType === 'inventory' || tabType === 'stock' || tabType === 'alerts') {
                 // Delete only product data
                 await db.run('DELETE FROM products');

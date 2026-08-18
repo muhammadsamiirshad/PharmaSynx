@@ -2,17 +2,35 @@ const { app, BrowserWindow, shell } = require('electron');
 const { spawn } = require('child_process');
 const path = require('path');
 const http = require('http');
+const fs = require('fs');
 
-const isDev = process.env.NODE_ENV === 'development';
+const isDev = !app.isPackaged;
 
 let backendProcess = null;
 let frontendProcess = null;
 
+function getLogPath() {
+  const baseDir = app.isPackaged ? path.dirname(process.execPath) : app.getAppPath();
+  return path.join(baseDir, 'startup.log');
+}
+
+function writeLog(message) {
+  const line = `[${new Date().toISOString()}] ${message}\n`;
+
+  try {
+    fs.appendFileSync(getLogPath(), line, 'utf8');
+  } catch (err) {
+    console.error('Failed to write startup log:', err);
+  }
+}
+
 function getAppRoot() {
-  return app.isPackaged ? path.join(process.resourcesPath, 'app') : app.getAppPath();
+  return app.getAppPath();
 }
 
 function startNodeScript(args, label, cwd) {
+  writeLog(`${label}: starting with cwd=${cwd} args=${JSON.stringify(args)}`);
+
   const child = spawn(process.execPath, args, {
     cwd,
     env: {
@@ -20,16 +38,26 @@ function startNodeScript(args, label, cwd) {
       ELECTRON_RUN_AS_NODE: '1',
       NODE_ENV: 'production',
     },
-    stdio: 'inherit',
+    stdio: ['ignore', 'pipe', 'pipe'],
     windowsHide: true,
+  });
+
+  child.stdout.on('data', (chunk) => {
+    writeLog(`${label} stdout: ${chunk.toString().trim()}`);
+  });
+
+  child.stderr.on('data', (chunk) => {
+    writeLog(`${label} stderr: ${chunk.toString().trim()}`);
   });
 
   child.on('error', (err) => {
     console.error(`${label} failed to start:`, err);
+    writeLog(`${label} failed to start: ${err.message}`);
   });
 
   child.on('exit', (code, signal) => {
     console.log(`${label} exited with code ${code} and signal ${signal}`);
+    writeLog(`${label} exited with code=${code} signal=${signal}`);
   });
 
   return child;
@@ -40,11 +68,20 @@ function startBackgroundServices() {
 
   const appRoot = getAppRoot();
   const exeDir = app.isPackaged ? path.dirname(process.execPath) : appRoot;
+  const resourcesDir = app.isPackaged ? process.resourcesPath : appRoot;
   const backendScript = path.join(appRoot, 'server.js');
   const nextCli = path.join(appRoot, 'node_modules', 'next', 'dist', 'bin', 'next');
 
+  writeLog(`App root: ${appRoot}`);
+  writeLog(`Resources dir: ${resourcesDir}`);
+  writeLog(`Exe dir: ${exeDir}`);
+
   backendProcess = startNodeScript([backendScript], 'Backend server', exeDir);
-  frontendProcess = startNodeScript([nextCli, 'start', '-p', '3000'], 'Next.js frontend', appRoot);
+  frontendProcess = startNodeScript(
+    [nextCli, 'start', appRoot, '--port', '3000', '--hostname', '127.0.0.1'],
+    'Next.js frontend',
+    resourcesDir,
+  );
 }
 
 function stopProcess(child, label) {
@@ -121,13 +158,14 @@ async function createWindow() {
   try {
     if (!isDev) {
       await Promise.all([
-        waitForUrl('http://localhost:3000'),
-        waitForUrl('http://localhost:5000'),
+        waitForUrl('http://127.0.0.1:3000'),
+        waitForUrl('http://127.0.0.1:5000'),
       ]);
     }
 
-    await mainWindow.loadURL('http://localhost:3000');
+    await mainWindow.loadURL('http://127.0.0.1:3000');
   } catch (err) {
+    writeLog(`Window failed to load app URL: ${err.message}`);
     await mainWindow.loadURL('data:text/html;charset=utf-8,<h2>Failed to start app</h2><p>Could not reach http://localhost:3000.</p>');
     console.error(err);
   }
@@ -138,6 +176,8 @@ async function createWindow() {
 }
 
 app.whenReady().then(async () => {
+  writeLog(`Electron ready. isPackaged=${app.isPackaged} appPath=${app.getAppPath()}`);
+
   if (!isDev) {
     startBackgroundServices();
   }

@@ -27,6 +27,11 @@ interface ReceiptModalProps {
     orderNumber?: string; // Order number prop - this will be the actual database ID
     amountReceived?: number;
     changeAmount?: number;
+    receiptTitle?: string;
+    orderLabel?: string;
+    linkedSaleNumber?: string;
+    primaryActionLabel?: string;
+    showPrimaryAction?: boolean;
 }
 
 const printStyles = `
@@ -136,7 +141,12 @@ const ReceiptModal = ({
     saveSale,
     orderNumber,
     amountReceived = 0,
-    changeAmount = 0
+    changeAmount = 0,
+    receiptTitle = 'Receipt',
+    orderLabel = 'Order #',
+    linkedSaleNumber,
+    primaryActionLabel = 'Print Receipt',
+    showPrimaryAction = true
 }: ReceiptModalProps) => {
     const [mounted, setMounted] = useState(false);
     const [clientDate] = useState(() => new Date().toLocaleDateString());
@@ -211,7 +221,7 @@ const ReceiptModal = ({
                 <!DOCTYPE html>
                 <html>
                 <head>
-                    <title>Sales Receipt</title>
+                    <title>${receiptTitle}</title>
                     <meta charset="UTF-8">
                     <meta name="viewport" content="width=device-width, initial-scale=1.0">
                     <style>
@@ -304,6 +314,7 @@ const ReceiptModal = ({
                 <body>
                     <div class="receipt-header">
                         <h2>${storeSettings.storeName}</h2>
+                        <p style="font-weight: bold; font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px;">${receiptTitle}</p>
                         <p>${storeSettings.storeAddress}</p>
                         <p>Phone: ${storeSettings.storePhone}</p>
                         ${storeSettings.storeEmail ? `<p>Email: ${storeSettings.storeEmail}</p>` : ''}
@@ -317,7 +328,8 @@ const ReceiptModal = ({
                     </div>
                     
                     <div class="order-details">
-                        <div class="order-number">Order #: ${orderNumber || 'N/A'}</div>
+                        <div class="order-number">${orderLabel}: ${orderNumber || 'N/A'}</div>
+                        ${linkedSaleNumber ? `<div style="margin-top: 4px; font-size: 11px;">Linked Sale #: ${linkedSaleNumber}</div>` : ''}
                     </div>
                     
                     <div class="divider"></div>
@@ -359,7 +371,7 @@ const ReceiptModal = ({
                         </div>
                         ` : ''}
                         <div class="total-line grand-total">
-                            <span>Total:</span>
+                            <span>${receiptTitle.toLowerCase().includes('return') ? 'Refund Total:' : 'Total:'}</span>
                             <span>${storeSettings.currency} ${calculateTotal()}</span>
                         </div>
                         ${amountReceived > 0 ? `
@@ -379,7 +391,8 @@ const ReceiptModal = ({
                     
                     <div class="footer">
                         ${storeSettings.receiptFooter.split('\n').map(line => `<p>${line}</p>`).join('')}
-                        <p><b>Order #: ${orderNumber || 'N/A'}</b></p>
+                        <p><b>${orderLabel}: ${orderNumber || 'N/A'}</b></p>
+                        ${linkedSaleNumber ? `<p><b>Linked Sale #: ${linkedSaleNumber}</b></p>` : ''}
                     </div>
                     
                     <script>
@@ -394,7 +407,7 @@ const ReceiptModal = ({
             printWin.document.close();
         }
         onClose();
-    }, [items, discount, calculateSubtotal, calculateTotal, orderNumber, amountReceived, changeAmount, clientDate, clientTime, onClose, storeSettings]);
+    }, [items, discount, calculateSubtotal, calculateTotal, orderNumber, amountReceived, changeAmount, clientDate, clientTime, onClose, storeSettings, receiptTitle, orderLabel, linkedSaleNumber]);
 
     useEffect(() => {
         setMounted(true);
@@ -444,7 +457,7 @@ const ReceiptModal = ({
                 {/* Header */}
                 <div className="p-4 border-b border-gray-200 no-print">
                     <div className="flex justify-between items-center">
-                        <h2 className="text-lg font-bold text-teal-700">Receipt</h2>
+                        <h2 className="text-lg font-bold text-teal-700">{receiptTitle}</h2>
                         <button onClick={onClose} className="text-gray-500 hover:text-gray-700 no-print">
                             <FaTimes size={20} />
                         </button>
@@ -473,7 +486,10 @@ const ReceiptModal = ({
                     
                     {/* Order Number - Using the raw database ID */}
                     <div className="text-center mb-2 bg-gray-300 py-1 rounded">
-                        <p className="font-bold text-gray-800">Order #: {orderNumber}</p>
+                        <p className="font-bold text-gray-800">{orderLabel}: {orderNumber}</p>
+                        {linkedSaleNumber && (
+                            <p className="text-xs text-gray-700 mt-1">Linked Sale #: {linkedSaleNumber}</p>
+                        )}
                     </div>
                     
                     <div className="receipt-divider border-t border-dashed border-gray-300"></div>
@@ -518,7 +534,7 @@ const ReceiptModal = ({
                         )}
                         <div className="receipt-divider border-t border-dashed border-gray-300 text-gray-800"></div>
                         <div className="flex justify-between receipt-bold font-bold">
-                            <p>Total:</p>
+                            <p>{receiptTitle.toLowerCase().includes('return') ? 'Refund Total:' : 'Total:'}</p>
                             <p>{storeSettings.currency} {calculateTotal()}</p>
                         </div>
                         {amountReceived > 0 && (
@@ -541,30 +557,35 @@ const ReceiptModal = ({
                         {storeSettings.receiptFooter.split('\n').map((line, i) => (
                             <p key={i}>{line}</p>
                         ))}
-                        <p className="mt-3 receipt-bold font-bold">Order #: {orderNumber}</p>
+                        <p className="mt-3 receipt-bold font-bold">{orderLabel}: {orderNumber}</p>
+                        {linkedSaleNumber && (
+                            <p className="mt-1 text-gray-700">Linked Sale #: {linkedSaleNumber}</p>
+                        )}
                     </div>
                 </div>
 
                 <div className="p-4 border-t border-gray-200 bg-white sticky bottom-0 no-print">
                     <div className="flex justify-between">
-                        <button
-                            onClick={handleSaveAndPrint}
-                            onKeyDown={handleSaveAndPrint}
-                            disabled={isSaving}
-                            className={`px-4 py-2 ${isSaving ? 'bg-gray-400' : 'bg-teal-600'} text-white rounded-lg flex items-center hover:bg-teal-700 transition-colors`}
-                        >
-                            {isSaving ? (
-                                <>
-                                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
-                                    Processing...
-                                </>
-                            ) : (
-                                <>
-                                    <FaPrint className="mr-2" />
-                                    Print Receipt
-                                </>
-                            )}
-                        </button>
+                        {showPrimaryAction ? (
+                            <button
+                                onClick={handleSaveAndPrint}
+                                onKeyDown={handleSaveAndPrint}
+                                disabled={isSaving}
+                                className={`px-4 py-2 ${isSaving ? 'bg-gray-400' : 'bg-teal-600'} text-white rounded-lg flex items-center hover:bg-teal-700 transition-colors`}
+                            >
+                                {isSaving ? (
+                                    <>
+                                        <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
+                                        Processing...
+                                    </>
+                                ) : (
+                                    <>
+                                        <FaPrint className="mr-2" />
+                                        {primaryActionLabel}
+                                    </>
+                                )}
+                            </button>
+                        ) : <span />}
                         <button
                             onClick={onClose}
                             className="px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition-colors"

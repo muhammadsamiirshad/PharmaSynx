@@ -60,6 +60,13 @@ const ClearDataButton: React.FC<ClearDataButtonProps> = ({ onSuccess, className,
           confirmMessage: 'This will permanently delete all sales records and transaction history.',
           itemsToDelete: ['All sales records', 'All transaction history']
         };
+      case 'returns':
+        return {
+          buttonText: 'Clear Return Data',
+          confirmTitle: 'Clear Return History',
+          confirmMessage: 'This will permanently delete all return and refund records.',
+          itemsToDelete: ['All return records', 'All refund records']
+        };
       case 'inventory':
       case 'stock':
       case 'alerts':
